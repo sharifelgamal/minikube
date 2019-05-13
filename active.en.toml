@@ -1,0 +1,1 @@
+REUSE_VM = "Re-using the currently running %s VM for %q ..."

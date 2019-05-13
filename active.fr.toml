@@ -1,0 +1,3 @@
+[REUSE_VM]
+hash = "sha1-afeb2674c7b15bbacb252c1d934d308de67dae77"
+other = "Réutilisant le VM %s en cours d'exécution pour %q ..."
