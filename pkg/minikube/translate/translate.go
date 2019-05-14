@@ -17,13 +17,13 @@ limitations under the License.
 package translate
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/cloudfoundry-attic/jibber_jabber"
 	"github.com/golang/glog"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
-	"github.com/pelletier/go-toml"
 	"golang.org/x/text/language"
 )
 
@@ -39,12 +39,11 @@ var (
 // Translate translates the given string to the supplied langauge.
 func Translate(m i18n.Message) string {
 
-	/*if preferredLanguage == defaultLanguage {
+	if preferredLanguage == defaultLanguage {
 		return m.Other
-	}*/
+	}
 
-	s, err := localizer.Localize(&i18n.LocalizeConfig{DefaultMessage: &m})
-	fmt.Printf("LOCALIZED STRING = %s", s)
+	s, err := localizer.LocalizeMessage(&m)
 	if err != nil {
 		fmt.Println(err)
 		glog.Warningf("Failed to translate %s: %s", m.Other, err)
@@ -65,14 +64,15 @@ func DetermineLocale() {
 
 	if preferredLanguage != defaultLanguage {
 		bundle := i18n.NewBundle(defaultLanguage)
-		bundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
+		bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 		/*filepath.Walk("translations", func(path string, info os.FileInfo, err error) error {
 			bundle.LoadMessageFile(path)
 			return nil
 		})*/
-		bundle.LoadMessageFile("active.fr.toml")
+		bundle.LoadMessageFile("active.fr.json")
 		localizer = i18n.NewLocalizer(bundle, locale)
 	}
+
 }
 
 // SetPreferredLanguageTag configures which language future messages should use.

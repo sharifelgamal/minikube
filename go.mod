@@ -57,7 +57,7 @@ require (
 	github.com/onsi/ginkgo v1.8.0 // indirect
 	github.com/onsi/gomega v1.5.0 // indirect
 	github.com/pborman/uuid v0.0.0-20150603214016-ca53cad383ca
-	github.com/pelletier/go-toml v1.2.0
+	github.com/pelletier/go-toml v1.4.0
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pkg/browser v0.0.0-20160118053552-9302be274faa
 	github.com/pkg/errors v0.8.0
