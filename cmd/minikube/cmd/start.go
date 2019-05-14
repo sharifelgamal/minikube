@@ -37,6 +37,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -51,6 +52,7 @@ import (
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/logs"
 	"k8s.io/minikube/pkg/minikube/machine"
+	"k8s.io/minikube/pkg/minikube/translate"
 	pkgutil "k8s.io/minikube/pkg/util"
 	"k8s.io/minikube/pkg/version"
 )
@@ -624,7 +626,12 @@ func configureRuntimes(h *host.Host, runner bootstrapper.CommandRunner, k8sVersi
 		exit.WithError(fmt.Sprintf("Failed runtime for %+v", config), err)
 	}
 	version, _ := cr.Version()
-	console.OutStyle(cr.Name(), "Configuring environment for Kubernetes %s on %s %s", k8sVersion, cr.Name(), version)
+	
+	s := translate.Translate(i18n.Message{
+                        ID:    "CONFIG_ENV",
+                        Other: "Configuring environment for Kubernetes %s on %s %s",
+                })
+	console.OutStyle(cr.Name(), s, k8sVersion, cr.Name(), version)
 	for _, v := range dockerOpt {
 		console.OutStyle("option", "opt %s", v)
 	}
