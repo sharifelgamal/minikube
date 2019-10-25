@@ -165,7 +165,7 @@ if type -P vboxmanage; then
     vboxmanage unregistervm "${guid}" || true
   done
 
-  ifaces=$(vboxmanage list hostonlyifs | grep -E "^Name:" | awk '{ printf $2 }')
+  ifaces=$(vboxmanage list hostonlyifs | grep -E "^Name:" | awk '{ print $2 }')
   for if in $ifaces; do
     vboxmanage hostonlyif remove "${if}" || true
   done
@@ -256,11 +256,14 @@ fi
 
 echo ""
 echo ">> Starting ${E2E_BIN} at $(date)"
+set -x
 ${SUDO_PREFIX}${E2E_BIN} \
   -minikube-start-args="--vm-driver=${VM_DRIVER} ${EXTRA_START_ARGS}" \
+  -expected-default-driver="${EXPECTED_DEFAULT_DRIVER}" \
   -test.timeout=60m \
   -test.parallel=${PARALLEL_COUNT} \
   -binary="${MINIKUBE_BIN}" && result=$? || result=$?
+set +x
 echo ">> ${E2E_BIN} exited with ${result} at $(date)"
 echo ""
 
