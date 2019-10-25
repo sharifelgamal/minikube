@@ -157,7 +157,7 @@ var kubeletSystemdTemplate = template.Must(template.New("kubeletSystemdTemplate"
 
 [Service]
 ExecStart=
-ExecStart={{.KubeletPath}}{{if .ExtraOptions}} {{.ExtraOptions}}{{end}}
+ExecStart={{.KubeletPath}} --node-ip={{.NodeIP}} --hostname-override={{.Hostname}} {{if .ExtraOptions}} {{.ExtraOptions}}{{end}}
 
 [Install]
 `))

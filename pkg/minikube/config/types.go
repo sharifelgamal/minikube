@@ -84,6 +84,7 @@ type KubernetesConfig struct {
 	ServiceCIDR       string
 	ImageRepository   string
 	ExtraOptions      ExtraOptionSlice
+	BootstrapToken    string
 
 	ShouldLoadCachedImages bool
 	EnableDefaultCNI       bool
