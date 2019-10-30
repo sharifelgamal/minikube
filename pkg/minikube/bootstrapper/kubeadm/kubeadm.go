@@ -644,10 +644,10 @@ func (k *Bootstrapper) JoinCluster(k8s config.KubernetesConfig) error {
 	}()
 
 	// Join the master by specifying its token
-	cmd := fmt.Sprintf("%s join --token %s %s:%d",
-		invokeKubeadm(k8s.KubernetesVersion), k8s.BootstrapToken, k8s.NodeIP, k8s.NodePort)
+	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s %s:%d",
+		invokeKubeadm(k8s.KubernetesVersion), k8s.BootstrapToken, k8s.NodeIP, k8s.NodePort))
 
-	out, err := k.c.CombinedOutput(cmd)
+	out, err := k.c.RunCmd(cmd)
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
 	}

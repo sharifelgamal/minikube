@@ -17,7 +17,6 @@ limitations under the License.
 package cmd
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -33,6 +32,7 @@ import (
 	"time"
 
 	"github.com/blang/semver"
+	"github.com/dchest/uniuri"
 	"github.com/docker/machine/libmachine"
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/ssh"
@@ -848,11 +848,6 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 		out.T(out.SuccessType, "Using image repository {{.name}}", out.V{"name": repository})
 	}
 
-	token, err := generateBootstrapToken()
-	if err != nil {
-		exit.WithError("Failed to generate bootstrap token", err)
-	}
-
 	cfg := cfg.Config{
 		MachineConfig: cfg.MachineConfig{
 			KeepContext:         viper.GetBool(keepContext),
@@ -901,7 +896,7 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 			ExtraOptions:           extraOptions,
 			ShouldLoadCachedImages: viper.GetBool(cacheImages),
 			EnableDefaultCNI:       selectedEnableDefaultCNI,
-			BootstrapToken:         token,
+			BootstrapToken:         generateBootstrapToken(),
 		},
 	}
 	return cfg, nil
@@ -1228,19 +1223,9 @@ func saveConfig(clusterCfg *cfg.Config) error {
 	return cfg.CreateProfile(viper.GetString(cfg.MachineProfile), clusterCfg)
 }
 
-func generateBootstrapToken() (string, error) {
-	first := make([]byte, 6)
-	second := make([]byte, 6)
+func generateBootstrapToken() string {
+	first := uniuri.NewLen(6)
+	second := uniuri.NewLen(16)
 
-	_, err := rand.Read(first)
-	if err != nil {
-		return "", err
-	}
-
-	_, err = rand.Read(second)
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%s.%s", first, second), nil
+	return fmt.Sprintf("%s.%s", first, second)
 }
