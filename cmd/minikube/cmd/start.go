@@ -17,6 +17,7 @@ limitations under the License.
 package cmd
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -121,6 +122,7 @@ const (
 	minimumCPUS           = 2
 	minimumDiskSize       = "2000mb"
 	autoUpdate            = "auto-update-drivers"
+	nodes                 = "nodes"
 )
 
 var (
@@ -175,6 +177,7 @@ func initMinikubeFlags() {
 	startCmd.Flags().Duration(waitTimeout, 6*time.Minute, "max time to wait per Kubernetes core services to be healthy.")
 	startCmd.Flags().Bool(nativeSSH, true, "Use native Golang SSH client (default true). Set to 'false' to use the command line 'ssh' command when accessing the docker machine. Useful for the machine drivers when they will not start with 'Waiting for SSH'.")
 	startCmd.Flags().Bool(autoUpdate, true, "If set, automatically updates drivers to the latest version. Defaults to true.")
+	startCmd.Flags().IntP(nodes, "n", 1, "Number of nodes to start minikube on.")
 }
 
 // initKubernetesFlags inits the commandline flags for kubernetes related options
@@ -356,7 +359,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	bs := setupKubeAdm(machineAPI, config.KubernetesConfig)
 
 	// pull images or restart cluster
-	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade)
+	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade, viper.GetInt(nodes))
 	configureMounts()
 
 	// enable addons with start command
@@ -845,6 +848,11 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 		out.T(out.SuccessType, "Using image repository {{.name}}", out.V{"name": repository})
 	}
 
+	token, err := generateBootstrapToken()
+	if err != nil {
+		exit.WithError("Failed to generate bootstrap token", err)
+	}
+
 	cfg := cfg.Config{
 		MachineConfig: cfg.MachineConfig{
 			KeepContext:         viper.GetBool(keepContext),
@@ -893,6 +901,7 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 			ExtraOptions:           extraOptions,
 			ShouldLoadCachedImages: viper.GetBool(cacheImages),
 			EnableDefaultCNI:       selectedEnableDefaultCNI,
+			BootstrapToken:         token,
 		},
 	}
 	return cfg, nil
@@ -1152,7 +1161,7 @@ func configureRuntimes(runner cruntime.CommandRunner, drvName string, k8s cfg.Ku
 }
 
 // bootstrapCluster starts Kubernetes using the chosen bootstrapper
-func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner command.Runner, kc cfg.KubernetesConfig, preexisting bool, isUpgrade bool) {
+func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner command.Runner, kc cfg.KubernetesConfig, preexisting bool, isUpgrade bool, nodes int) {
 	// hum. bootstrapper.Bootstrapper should probably have a Name function.
 	bsName := viper.GetString(cmdcfg.Bootstrapper)
 
@@ -1174,6 +1183,15 @@ func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner c
 	out.T(out.Launch, "Launching Kubernetes ... ")
 	if err := bs.StartCluster(kc); err != nil {
 		exit.WithLogEntries("Error starting cluster", err, logs.FindProblems(r, bs, runner))
+	}
+
+	// Multinode?!?!
+	if nodes > 1 {
+		for i := 1; i < nodes; i++ {
+			if err := bs.JoinCluster(kc); err != nil {
+				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(r, bs, runner))
+			}
+		}
 	}
 }
 
@@ -1206,4 +1224,21 @@ func configureMounts() {
 // saveConfig saves profile cluster configuration in $MINIKUBE_HOME/profiles/<profilename>/config.json
 func saveConfig(clusterCfg *cfg.Config) error {
 	return cfg.CreateProfile(viper.GetString(cfg.MachineProfile), clusterCfg)
+}
+
+func generateBootstrapToken() (string, error) {
+	first := make([]byte, 6)
+	second := make([]byte, 6)
+
+	_, err := rand.Read(first)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = rand.Read(second)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s.%s", first, second), nil
 }

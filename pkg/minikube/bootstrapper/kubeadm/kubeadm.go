@@ -302,36 +302,6 @@ func (k *Bootstrapper) StartCluster(k8s config.KubernetesConfig) error {
 	return nil
 }
 
-// JoinCluster adds a node to an existing cluster
-func (k *Bootstrapper) JoinCluster(k8s config.KubernetesConfig) error {
-	start := time.Now()
-	glog.Infof("JoinCluster: %+v", k8s)
-	defer func() {
-		glog.Infof("JoinCluster complete in %s", time.Since(start))
-	}()
-
-	// Join the master by specifying its token
-	cmd := fmt.Sprintf("%s join --token %s %s:%d",
-		invokeKubeadm(k8s.KubernetesVersion), k8s.BootstrapToken, k8s.NodeIP, k8s.NodePort)
-
-	out, err := k.c.CombinedOutput(cmd)
-	if err != nil {
-		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
-	}
-
-	// Reload and start the kubelet
-	out, err = k.c.CombinedOutput(`
-sudo systemctl daemon-reload &&
-sudo systemctl enable kubelet &&
-sudo systemctl start kubelet
-`)
-	if err != nil {
-		return errors.Wrapf(err, "starting kubelet failed: %s\n", out)
-	}
-
-	return nil
-}
-
 // adjustResourceLimits makes fine adjustments to pod resources that aren't possible via kubeadm config.
 func (k *Bootstrapper) adjustResourceLimits() error {
 	score, err := k.c.CombinedOutput("cat /proc/$(pgrep kube-apiserver)/oom_adj")
@@ -662,6 +632,26 @@ func NewKubeletConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, 
 	}
 
 	return b.Bytes(), nil
+}
+
+// JoinCluster adds a node to an existing cluster
+func (k *Bootstrapper) JoinCluster(k8s config.KubernetesConfig) error {
+	start := time.Now()
+	glog.Infof("JoinCluster: %+v", k8s)
+	defer func() {
+		glog.Infof("JoinCluster complete in %s", time.Since(start))
+	}()
+
+	// Join the master by specifying its token
+	cmd := fmt.Sprintf("%s join --token %s %s:%d",
+		invokeKubeadm(k8s.KubernetesVersion), k8s.BootstrapToken, k8s.NodeIP, k8s.NodePort)
+
+	out, err := k.c.CombinedOutput(cmd)
+	if err != nil {
+		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
+	}
+
+	return k.UpdateCluster(k8s)
 }
 
 // UpdateCluster updates the cluster

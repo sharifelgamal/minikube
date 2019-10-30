@@ -36,6 +36,7 @@ kubernetesVersion: {{.KubernetesVersion}}
 certificatesDir: {{.CertDir}}
 networking:
   serviceSubnet: {{.ServiceCIDR}}
+  podSubnet: {{if .PodSubnet}}{{.PodSubnet}}{{else}}""{{end}}
 etcd:
   dataDir: {{.EtcdDataDir}}
 nodeName: {{.NodeName}}
@@ -139,7 +140,7 @@ etcd:
 kubernetesVersion: {{.KubernetesVersion}}
 networking:
   dnsDomain: {{if .DNSDomain}}{{.DNSDomain}}{{else}}cluster.local{{end}}
-  podSubnet: ""
+  podSubnet: {{if .PodSubnet}}{{.PodSubnet}}{{else}}""{{end}}
   serviceSubnet: {{.ServiceCIDR}}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -157,7 +158,7 @@ var kubeletSystemdTemplate = template.Must(template.New("kubeletSystemdTemplate"
 
 [Service]
 ExecStart=
-ExecStart={{.KubeletPath}} --node-ip={{.NodeIP}} --hostname-override={{.Hostname}} {{if .ExtraOptions}} {{.ExtraOptions}}{{end}}
+ExecStart={{.KubeletPath}} {{if .ExtraOptions}} {{.ExtraOptions}}{{end}}
 
 [Install]
 `))
