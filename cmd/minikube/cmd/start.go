@@ -1205,7 +1205,9 @@ func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner c
 	// Multinode?!?!
 	if nodes > 1 {
 		for i := 1; i < nodes; i++ {
-			if err := bs.JoinCluster(kc); err != nil {
+			k := kc
+			k.NodeName = kc.NodeName + "-" + string(i)
+			if err := bs.JoinCluster(k); err != nil {
 				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(r, bs, runner))
 			}
 		}
@@ -1247,5 +1249,5 @@ func generateBootstrapToken() string {
 	first := uniuri.NewLen(6)
 	second := uniuri.NewLen(16)
 
-	return fmt.Sprintf("%s.%s", first, second)
+	return fmt.Sprintf("%s.%s", strings.ToLower(first), strings.ToLower(second))
 }

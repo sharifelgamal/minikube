@@ -46,6 +46,7 @@ nodeName: {{.NodeName}}
   {{$val}}{{end}}
 {{end}}{{if .FeatureArgs}}featureGates: {{range $i, $val := .FeatureArgs}}
   {{$i}}: {{$val}}{{end}}
+{{if .BootstrapToken}}token: {{.BootstrapToken}}{{end}}
 {{end}}`))
 
 // configTmplV1Alpha3 is for Kubernetes v1.12
@@ -57,6 +58,7 @@ apiEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
+  - token: {{.BootstrapToken}}
   - groups:
       - system:bootstrappers:kubeadm:default-node-token
     ttl: 24h0m0s
@@ -106,6 +108,7 @@ localAPIEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
+  - token: {{.BootstrapToken}}
   - groups:
       - system:bootstrappers:kubeadm:default-node-token
     ttl: 24h0m0s
