@@ -354,11 +354,28 @@ func runStart(cmd *cobra.Command, args []string) {
 	bs := setupKubeAdm(machineAPI, config.KubernetesConfig)
 
 	// pull images or restart cluster
-	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade, viper.GetInt(nodes))
+	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade)
+
 	configureMounts()
 
 	// enable addons with start command
 	enableAddons()
+
+	n := viper.GetInt(nodes)
+	if n > 1 {
+		// Multinode?!?!
+		for i := 1; i < n; i++ {
+			k := config.KubernetesConfig
+			k.NodeName = config.KubernetesConfig.NodeName + "-" + string(i)
+			nodeBs, err := getClusterBootstrapper(machineAPI, viper.GetString(cmdcfg.Bootstrapper))
+			if err != nil {
+				exit.WithError("getting bootstrapper", err)
+			}
+			if err := nodeBs.JoinCluster(k); err != nil {
+				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, bs, mRunner))
+			}
+		}
+	}
 
 	if err = loadCachedImagesInConfigFile(); err != nil {
 		out.T(out.FailureType, "Unable to load cached images from config file.")
@@ -1178,7 +1195,7 @@ func configureRuntimes(runner cruntime.CommandRunner, drvName string, k8s cfg.Ku
 }
 
 // bootstrapCluster starts Kubernetes using the chosen bootstrapper
-func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner command.Runner, kc cfg.KubernetesConfig, preexisting bool, isUpgrade bool, nodes int) {
+func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner command.Runner, kc cfg.KubernetesConfig, preexisting bool, isUpgrade bool) {
 	// hum. bootstrapper.Bootstrapper should probably have a Name function.
 	bsName := viper.GetString(cmdcfg.Bootstrapper)
 
@@ -1200,17 +1217,6 @@ func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner c
 	out.T(out.Launch, "Launching Kubernetes ... ")
 	if err := bs.StartCluster(kc); err != nil {
 		exit.WithLogEntries("Error starting cluster", err, logs.FindProblems(r, bs, runner))
-	}
-
-	// Multinode?!?!
-	if nodes > 1 {
-		for i := 1; i < nodes; i++ {
-			k := kc
-			k.NodeName = kc.NodeName + "-" + string(i)
-			if err := bs.JoinCluster(k); err != nil {
-				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(r, bs, runner))
-			}
-		}
 	}
 }
 
