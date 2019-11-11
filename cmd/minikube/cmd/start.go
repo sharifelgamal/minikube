@@ -144,7 +144,6 @@ func init() {
 	if err := viper.BindPFlags(startCmd.Flags()); err != nil {
 		exit.WithError("unable to bind flags", err)
 	}
-
 }
 
 // initMinikubeFlags includes commandline flags for minikube.
@@ -287,19 +286,20 @@ func runStart(cmd *cobra.Command, args []string) {
 		registryMirror = viper.GetStringSlice("registry_mirror")
 	}
 
-	oldConfig, err := cfg.Load()
+	existing, err := cfg.Load()
 	if err != nil && !os.IsNotExist(err) {
 		exit.WithCodeT(exit.Data, "Unable to load config: {{.error}}", out.V{"error": err})
 	}
 
-	driverName := selectDriver(oldConfig)
-	glog.Infof("selected: %v", driverName)
+	driverName := selectDriver(existing)
+	glog.Infof("selected driver: %s", driverName)
+	validateDriver(driverName, existing)
 	err = autoSetDriverOptions(cmd, driverName)
 	if err != nil {
 		glog.Errorf("Error autoSetOptions : %v", err)
 	}
 
-	validateFlags(driverName)
+	validateFlags(cmd, driverName)
 	validateUser(driverName)
 
 	// No need to install a driver in download-only mode
@@ -307,7 +307,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		updateDriver(driverName)
 	}
 
-	k8sVersion, isUpgrade := getKubernetesVersion(oldConfig)
+	k8sVersion, isUpgrade := getKubernetesVersion(existing)
 	config, err := generateCfgFromFlags(cmd, k8sVersion, driverName)
 	if err != nil {
 		exit.WithError("Failed to generate config", err)
@@ -386,7 +386,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		prepareNone()
 	}
 	waitCluster(bs, config)
-	if err := showKubectlInfo(kubeconfig, k8sVersion); err != nil {
+	if err := showKubectlInfo(kubeconfig, k8sVersion, config.MachineConfig.Name); err != nil {
 		glog.Errorf("kubectl info: %v", err)
 	}
 }
@@ -459,7 +459,7 @@ func setupKubeconfig(h *host.Host, c *cfg.Config) (*kubeconfig.Settings, error) 
 	}
 
 	kcs := &kubeconfig.Settings{
-		ClusterName:          cfg.GetMachineName(),
+		ClusterName:          c.MachineConfig.Name,
 		ClusterServerAddress: addr,
 		ClientCertificate:    localpath.MakeMiniPath("client.crt"),
 		ClientKey:            localpath.MakeMiniPath("client.key"),
@@ -529,11 +529,11 @@ func showVersionInfo(k8sVersion string, cr cruntime.Manager) {
 	}
 }
 
-func showKubectlInfo(kcs *kubeconfig.Settings, k8sVersion string) error {
+func showKubectlInfo(kcs *kubeconfig.Settings, k8sVersion string, machineName string) error {
 	if kcs.KeepContext {
 		out.T(out.Kubectl, "To connect to this cluster, use: kubectl --context={{.name}}", out.V{"name": kcs.ClusterName})
 	} else {
-		out.T(out.Ready, `Done! kubectl is now configured to use "{{.name}}"`, out.V{"name": cfg.GetMachineName()})
+		out.T(out.Ready, `Done! kubectl is now configured to use "{{.name}}"`, out.V{"name": machineName})
 	}
 
 	path, err := exec.LookPath("kubectl")
@@ -573,78 +573,99 @@ func showKubectlInfo(kcs *kubeconfig.Settings, k8sVersion string) error {
 	return nil
 }
 
-func selectDriver(oldConfig *cfg.Config) string {
+// selectDriver returns which driver to choose based on flags, existing configs, and hypervisor detection
+func selectDriver(existing *cfg.Config) string {
 	name := viper.GetString("vm-driver")
-	glog.Infof("selectDriver: flag=%q, old=%v", name, oldConfig)
-	if name == "" {
-		// By default, the driver is whatever we used last time
-		if oldConfig != nil {
-			return oldConfig.MachineConfig.VMDriver
-		}
-		options := driver.Choices()
-		pick, alts := driver.Choose(options)
-		if len(options) > 1 {
-			out.T(out.Sparkle, `Automatically selected the '{{.driver}}' driver (alternates: {{.alternates}})`, out.V{"driver": pick.Name, "alternates": alts})
-		} else {
-			out.T(out.Sparkle, `Automatically selected the '{{.driver}}' driver`, out.V{"driver": pick.Name})
-		}
+	glog.Infof("selectDriver: flag=%q, old=%v", name, existing)
+	options := driver.Choices()
+	pick, alts := driver.Choose(name, options)
 
-		if pick.Name == "" {
-			exit.WithCodeT(exit.Config, "Unable to determine a default driver to use. Try specifying --vm-driver, or see https://minikube.sigs.k8s.io/docs/start/")
-		}
-
-		name = pick.Name
+	if name != "" {
+		out.T(out.Sparkle, `Selecting '{{.driver}}' driver from user configuration (alternates: {{.alternates}})`, out.V{"driver": name, "alternates": alts})
+		return name
 	}
+
+	// By default, the driver is whatever we used last time
+	if existing != nil {
+		pick, alts := driver.Choose(existing.MachineConfig.VMDriver, options)
+		out.T(out.Sparkle, `Selecting '{{.driver}}' driver from existing profile (alternates: {{.alternates}})`, out.V{"driver": existing.MachineConfig.VMDriver, "alternates": alts})
+		return pick.Name
+	}
+
+	if len(options) > 1 {
+		out.T(out.Sparkle, `Automatically selected the '{{.driver}}' driver (alternates: {{.alternates}})`, out.V{"driver": pick.Name, "alternates": alts})
+	} else {
+		out.T(out.Sparkle, `Automatically selected the '{{.driver}}' driver`, out.V{"driver": pick.Name})
+	}
+
+	if pick.Name == "" {
+		exit.WithCodeT(exit.Config, "Unable to determine a default driver to use. Try specifying --vm-driver, or see https://minikube.sigs.k8s.io/docs/start/")
+	}
+	return pick.Name
+}
+
+// validateDriver validates that the selected driver appears sane, exits if not
+func validateDriver(name string, existing *cfg.Config) {
+	glog.Infof("validating driver %q against %+v", name, existing)
 	if !driver.Supported(name) {
-		exit.WithCodeT(exit.Failure, "The driver '{{.driver}}' is not supported on {{.os}}", out.V{"driver": name, "os": runtime.GOOS})
+		exit.WithCodeT(exit.Unavailable, "The driver '{{.driver}}' is not supported on {{.os}}", out.V{"driver": name, "os": runtime.GOOS})
 	}
 
 	st := driver.Status(name)
+	glog.Infof("status for %s: %+v", name, st)
+
 	if st.Error != nil {
 		out.ErrLn("")
-		out.WarningT("'{{.driver}}' driver reported a possible issue: {{.error}}", out.V{"driver": name, "error": st.Error, "fix": st.Fix})
+
+		out.WarningT("'{{.driver}}' driver reported an issue: {{.error}}", out.V{"driver": name, "error": st.Error})
 		out.ErrT(out.Tip, "Suggestion: {{.fix}}", out.V{"fix": translate.T(st.Fix)})
 		if st.Doc != "" {
 			out.ErrT(out.Documentation, "Documentation: {{.url}}", out.V{"url": st.Doc})
 		}
 		out.ErrLn("")
+
+		if !st.Installed && !viper.GetBool(force) {
+			if existing != nil && name == existing.MachineConfig.VMDriver {
+				exit.WithCodeT(exit.Unavailable, "{{.driver}} does not appear to be installed, but is specified by an existing profile. Please run 'minikube delete' or install {{.driver}}", out.V{"driver": name})
+			}
+			exit.WithCodeT(exit.Unavailable, "{{.driver}} does not appear to be installed", out.V{"driver": name})
+		}
 	}
 
-	// Detect if our driver conflicts with a previously created VM. If we run into any errors, just move on.
+	if existing == nil {
+		return
+	}
+
 	api, err := machine.NewAPIClient()
 	if err != nil {
-		glog.Infof("selectDriver NewAPIClient: %v", err)
-		return name
+		glog.Warningf("selectDriver NewAPIClient: %v", err)
+		return
 	}
 
-	exists, err := api.Exists(cfg.GetMachineName())
+	machineName := viper.GetString(cfg.MachineProfile)
+	h, err := api.Load(machineName)
 	if err != nil {
-		glog.Infof("selectDriver api.Exists: %v", err)
-		return name
-	}
-	if !exists {
-		return name
+		glog.Warningf("selectDriver api.Load: %v", err)
+		return
 	}
 
-	h, err := api.Load(cfg.GetMachineName())
-	if err != nil {
-		glog.Infof("selectDriver api.Load: %v", err)
-		return name
-	}
-
-	if h.Driver.DriverName() == name || h.Driver.DriverName() == "not-found" {
-		return name
+	if h.Driver.DriverName() == name {
+		return
 	}
 
 	out.ErrT(out.Conflict, `The existing "{{.profile_name}}" VM that was created using the "{{.old_driver}}" driver, and is incompatible with the "{{.driver}}" driver.`,
-		out.V{"profile_name": cfg.GetMachineName(), "driver": name, "old_driver": h.Driver.DriverName()})
+		out.V{"profile_name": machineName, "driver": name, "old_driver": h.Driver.DriverName()})
 
 	out.ErrT(out.Workaround, `To proceed, either:
-      1) Delete the existing VM using: '{{.command}} delete'
-      or
-      2) Restart with the existing driver: '{{.command}} start --vm-driver={{.old_driver}}'`, out.V{"command": minikubeCmd(), "old_driver": h.Driver.DriverName()})
-	exit.WithCodeT(exit.Config, "Exiting due to driver incompatibility")
-	return ""
+
+    1) Delete the existing "{{.profile_name}}" cluster using: '{{.command}} delete'
+
+    * or *
+
+    2) Start the existing "{{.profile_name}}" cluster using: '{{.command}} start --vm-driver={{.old_driver}}'
+	`, out.V{"command": minikubeCmd(), "old_driver": h.Driver.DriverName(), "profile_name": machineName})
+
+	exit.WithCodeT(exit.Config, "Exiting.")
 }
 
 func selectImageRepository(mirrorCountry string, k8sVersion string) (bool, string, error) {
@@ -741,7 +762,7 @@ func validateUser(drvName string) {
 }
 
 // validateFlags validates the supplied flags against known bad combinations
-func validateFlags(drvName string) {
+func validateFlags(cmd *cobra.Command, drvName string) {
 	diskSizeMB := pkgutil.CalculateSizeInMB(viper.GetString(humanReadableDiskSize))
 	if diskSizeMB < pkgutil.CalculateSizeInMB(minimumDiskSize) && !viper.GetBool(force) {
 		exit.WithCodeT(exit.Config, "Requested disk size {{.requested_size}} is less than minimum of {{.minimum_size}}", out.V{"requested_size": diskSizeMB, "minimum_size": pkgutil.CalculateSizeInMB(minimumDiskSize)})
@@ -758,8 +779,20 @@ func validateFlags(drvName string) {
 
 	var cpuCount int
 	if driver.BareMetal(drvName) {
-		if cfg.GetMachineName() != constants.DefaultMachineName {
+		if viper.GetString(cfg.MachineProfile) != constants.DefaultMachineName {
 			exit.WithCodeT(exit.Config, "The 'none' driver does not support multiple profiles: https://minikube.sigs.k8s.io/docs/reference/drivers/none/")
+		}
+
+		if cmd.Flags().Changed(cpus) {
+			out.WarningT("The 'none' driver does not respect the --cpus flag")
+		}
+		if cmd.Flags().Changed(memory) {
+			out.WarningT("The 'none' driver does not respect the --memory flag")
+		}
+
+		runtime := viper.GetString(containerRuntime)
+		if runtime != "docker" {
+			out.WarningT("Using the '{{.runtime}}' runtime with the 'none' driver is an untested configuration!", out.V{"runtime": runtime})
 		}
 
 		// Uses the gopsutil cpu package to count the number of physical cpu cores
@@ -878,6 +911,7 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 
 	cfg := cfg.Config{
 		MachineConfig: cfg.MachineConfig{
+			Name:                viper.GetString(cfg.MachineProfile),
 			KeepContext:         viper.GetBool(keepContext),
 			EmbedCerts:          viper.GetBool(embedCerts),
 			MinikubeISO:         viper.GetString(isoURL),
@@ -992,7 +1026,7 @@ func prepareNone() {
 
 // startHost starts a new minikube host using a VM or None
 func startHost(api libmachine.API, mc cfg.MachineConfig) (*host.Host, bool) {
-	exists, err := api.Exists(cfg.GetMachineName())
+	exists, err := api.Exists(mc.Name)
 	if err != nil {
 		exit.WithError("Failed to check if machine exists", err)
 	}
@@ -1002,7 +1036,7 @@ func startHost(api libmachine.API, mc cfg.MachineConfig) (*host.Host, bool) {
 		host, err = cluster.StartHost(api, mc)
 		if err != nil {
 			out.T(out.Resetting, "Retriable failure: {{.error}}", out.V{"error": err})
-			if derr := cluster.DeleteHost(api); derr != nil {
+			if derr := cluster.DeleteHost(api, mc.Name); derr != nil {
 				glog.Warningf("DeleteHost: %v", derr)
 			}
 		}
@@ -1138,8 +1172,8 @@ func getKubernetesVersion(old *cfg.Config) (string, bool) {
 	if nvs.LT(ovs) {
 		nv = version.VersionPrefix + ovs.String()
 		profileArg := ""
-		if cfg.GetMachineName() != constants.DefaultMachineName {
-			profileArg = fmt.Sprintf("-p %s", cfg.GetMachineName())
+		if old.MachineConfig.Name != constants.DefaultMachineName {
+			profileArg = fmt.Sprintf("-p %s", old.MachineConfig.Name)
 		}
 		exit.WithCodeT(exit.Config, `Error: You have selected Kubernetes v{{.new}}, but the existing cluster for your profile is running Kubernetes v{{.old}}. Non-destructive downgrades are not supported, but you can proceed by performing one of the following options:
 
