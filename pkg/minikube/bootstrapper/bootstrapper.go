@@ -38,8 +38,8 @@ type Bootstrapper interface {
 	// PullImages pulls images necessary for a cluster. Success should not be required.
 	PullImages(config.KubernetesConfig) error
 	StartCluster(config.KubernetesConfig) error
-	JoinCluster(config.KubernetesConfig) error
-	UpdateCluster(config.KubernetesConfig) error
+	JoinCluster(config.MachineConfig) error
+	UpdateCluster(config.MachineConfig) error
 	RestartCluster(config.KubernetesConfig) error
 	DeleteCluster(config.KubernetesConfig) error
 	WaitForPods(config.KubernetesConfig, time.Duration, []string) error

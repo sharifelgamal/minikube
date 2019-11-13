@@ -18,6 +18,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -79,13 +80,13 @@ func CreateEmptyProfile(name string, miniHome ...string) error {
 	return CreateProfile(name, cfg, miniHome...)
 }
 
-// CreateProfile creates an profile out of the cfg and stores in $MINIKUBE_HOME/profiles/<profilename>/config.json
+// CreateProfile creates a profile from the cfg and stores it in $MINIKUBE_HOME/profiles/<profilename>/<machinenane>/config.json
 func CreateProfile(name string, cfg *MachineConfig, miniHome ...string) error {
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
 		return err
 	}
-	path := profileFilePath(name, miniHome...)
+	path := profileFilePath(name, cfg.Name, miniHome...)
 	glog.Infof("Saving config to %s ...", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
@@ -157,10 +158,10 @@ func ListProfiles(miniHome ...string) (validPs []*Profile, inValidPs []*Profile,
 
 // LoadProfile loads type Profile based on its name
 func LoadProfile(name string, miniHome ...string) (*Profile, error) {
-	cfg, err := DefaultLoader.LoadConfigFromFile(name, miniHome...)
+	cfgs, err := DefaultLoader.LoadAllConfigFiles(name, miniHome...)
 	p := &Profile{
 		Name:   name,
-		Config: []*MachineConfig{cfg},
+		Config: cfgs,
 	}
 	return p, err
 }
@@ -181,14 +182,16 @@ func profileDirs(miniHome ...string) (dirs []string, err error) {
 	return dirs, err
 }
 
-// profileFilePath returns the Minikube profile config file
-func profileFilePath(profile string, miniHome ...string) string {
+// profileFilePath returns the path to the machine config file for the given profile and machine
+func profileFilePath(profile string, machine string, miniHome ...string) string {
 	miniPath := localpath.MiniPath()
 	if len(miniHome) > 0 {
 		miniPath = miniHome[0]
 	}
 
-	return filepath.Join(miniPath, "profiles", profile, "config.json")
+	//debug.PrintStack()
+	fmt.Printf("PROFILE=%s, MACHINE=%s\n", profile, machine)
+	return filepath.Join(miniPath, "profiles", profile, machine, "config.json")
 }
 
 // ProfileFolderPath returns path of profile folder

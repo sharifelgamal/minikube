@@ -100,7 +100,7 @@ var statusCmd = &cobra.Command{
 		apiserverSt := state.None.String()
 
 		if hostSt == state.Running.String() {
-			clusterBootstrapper, err := getClusterBootstrapper(api, viper.GetString(cmdcfg.Bootstrapper))
+			clusterBootstrapper, err := getClusterBootstrapper(api, viper.GetString(cmdcfg.Bootstrapper), machineName)
 			if err != nil {
 				exit.WithError("Error getting bootstrapper", err)
 			}

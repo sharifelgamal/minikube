@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	cmdConfig "k8s.io/minikube/cmd/minikube/cmd/config"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
@@ -43,7 +44,7 @@ var addCacheCmd = &cobra.Command{
 	Long:  "Add an image to local cache.",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Cache and load images into docker daemon
-		if err := machine.CacheAndLoadImages(args); err != nil {
+		if err := machine.CacheAndLoadImages(args, viper.GetString(config.MachineProfile)); err != nil {
 			exit.WithError("Failed to cache and load images", err)
 		}
 		// Add images to config file
@@ -98,7 +99,7 @@ func CacheImagesInConfigFile() error {
 }
 
 // loadCachedImagesInConfigFile loads the images currently in the config file (minikube start)
-func loadCachedImagesInConfigFile() error {
+func loadCachedImagesInConfigFile(machineName string) error {
 	images, err := imagesInConfigFile()
 	if err != nil {
 		return err
@@ -106,7 +107,7 @@ func loadCachedImagesInConfigFile() error {
 	if len(images) == 0 {
 		return nil
 	}
-	return machine.CacheAndLoadImages(images)
+	return machine.CacheAndLoadImages(images, machineName)
 }
 
 func init() {

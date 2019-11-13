@@ -24,6 +24,7 @@ import (
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/util"
@@ -65,7 +66,7 @@ func (m *clusterInspector) getStateAndRoute() (HostState, *Route, error) {
 		return hostState, nil, err
 	}
 	var c *config.MachineConfig
-	c, err = m.configLoader.LoadConfigFromFile(m.machineName)
+	c, err = m.configLoader.LoadConfigFromFile(viper.GetString(config.MachineProfile), m.machineName)
 	if err != nil {
 		err = errors.Wrapf(err, "error loading config for %s", m.machineName)
 		return hostState, nil, err

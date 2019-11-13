@@ -52,6 +52,7 @@ import (
 	"k8s.io/minikube/pkg/minikube/bootstrapper/kubeadm"
 	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/command"
+	"k8s.io/minikube/pkg/minikube/config"
 	cfg "k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/cruntime"
@@ -286,7 +287,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		registryMirror = viper.GetStringSlice("registry_mirror")
 	}
 
-	existing, err := cfg.Load()
+	existing, err := cfg.Load(viper.GetString(config.MachineProfile))
 	if err != nil && !os.IsNotExist(err) {
 		exit.WithCodeT(exit.Data, "Unable to load config: {{.error}}", out.V{"error": err})
 	}
@@ -338,7 +339,6 @@ func runStart(cmd *cobra.Command, args []string) {
 	// exits here in case of --download-only option.
 	handleDownloadOnly(&cacheGroup, k8sVersion)
 	mRunner, preExists, machineAPI, host := startMachine(&config)
-	defer machineAPI.Close()
 	// configure the runtime (docker, containerd, crio)
 	cr := configureRuntimes(mRunner, driverName, config.KubernetesConfig)
 	showVersionInfo(k8sVersion, cr)
@@ -351,7 +351,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 
 	// setup kubeadm (must come after setupKubeconfig)
-	bs := setupKubeAdm(machineAPI, config.KubernetesConfig)
+	bs := setupKubeAdm(machineAPI, config)
 
 	// pull images or restart cluster
 	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade)
@@ -361,24 +361,45 @@ func runStart(cmd *cobra.Command, args []string) {
 	// enable addons with start command
 	enableAddons()
 
+	if err = loadCachedImagesInConfigFile(config.Name); err != nil {
+		out.T(out.FailureType, "Unable to load cached images from config file.")
+	}
+
+	if err = machineAPI.Close(); err != nil {
+		glog.Warningf("Failed to close machineAPI: %v", err)
+	}
+
 	n := viper.GetInt(nodes)
 	if n > 1 {
 		// Multinode?!?!
 		for i := 1; i < n; i++ {
-			k := config.KubernetesConfig
-			k.NodeName = config.KubernetesConfig.NodeName + "-" + string(i)
-			nodeBs, err := getClusterBootstrapper(machineAPI, viper.GetString(cmdcfg.Bootstrapper))
-			if err != nil {
-				exit.WithError("getting bootstrapper", err)
+			k := config
+			k.KubernetesConfig.NodeName = fmt.Sprintf("%s-%d", config.KubernetesConfig.NodeName, i)
+			k.Name = fmt.Sprintf("%s-%d", config.Name, i)
+			fmt.Printf("NEW MACHINE NAME = %s\n", k.Name)
+			if err := saveConfig(&k); err != nil {
+				exit.WithError("Failed to save config", err)
 			}
-			if err := nodeBs.JoinCluster(k); err != nil {
-				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, bs, mRunner))
+			r, p, mAPI, h := startMachine(&k)
+			nodeCr := configureRuntimes(r, driverName, k.KubernetesConfig)
+
+			_, err := setupKubeconfig(h, &k, k.Name)
+			if err != nil {
+				exit.WithError("Failed to setup kubeconfig for node", err)
+			}
+			nBs := setupKubeAdm(mAPI, k)
+			bootstrapCluster(nBs, nodeCr, r, k.KubernetesConfig, p, isUpgrade)
+			if err := nBs.JoinCluster(k); err != nil {
+				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, nBs, r))
+			}
+
+			if err = loadCachedImagesInConfigFile(k.Name); err != nil {
+				out.T(out.FailureType, "Unable to load cached images from config file.")
+			}
+			if err = mAPI.Close(); err != nil {
+				glog.Warningf("Failed to close node machineAPI: %v", err)
 			}
 		}
-	}
-
-	if err = loadCachedImagesInConfigFile(); err != nil {
-		out.T(out.FailureType, "Unable to load cached images from config file.")
 	}
 
 	// special ops for none , like change minikube directory.
@@ -751,7 +772,7 @@ func validateUser(drvName string) {
 	if !useForce {
 		os.Exit(exit.Permissions)
 	}
-	_, err = cfg.Load()
+	_, err = cfg.Load(viper.GetString(config.MachineProfile))
 	if err == nil || !os.IsNotExist(err) {
 		out.T(out.Tip, "Tip: To remove this root owned cluster, run: sudo {{.cmd}} delete", out.V{"cmd": minikubeCmd()})
 	}
@@ -1187,8 +1208,8 @@ func getKubernetesVersion(old *cfg.MachineConfig) (string, bool) {
 }
 
 // setupKubeAdm adds any requested files into the VM before Kubernetes is started
-func setupKubeAdm(mAPI libmachine.API, kc cfg.KubernetesConfig) bootstrapper.Bootstrapper {
-	bs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper))
+func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig) bootstrapper.Bootstrapper {
+	bs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper), kc.Name)
 	if err != nil {
 		exit.WithError("Failed to get bootstrapper", err)
 	}
@@ -1199,7 +1220,7 @@ func setupKubeAdm(mAPI libmachine.API, kc cfg.KubernetesConfig) bootstrapper.Boo
 	if err := bs.UpdateCluster(kc); err != nil {
 		exit.WithError("Failed to update cluster", err)
 	}
-	if err := bs.SetupCerts(kc); err != nil {
+	if err := bs.SetupCerts(kc.KubernetesConfig); err != nil {
 		exit.WithError("Failed to setup certs", err)
 	}
 	return bs
