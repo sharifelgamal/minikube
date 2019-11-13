@@ -80,11 +80,7 @@ func CreateEmptyProfile(name string, miniHome ...string) error {
 	return CreateProfile(name, cfg, miniHome...)
 }
 
-<<<<<<< HEAD
-// CreateProfile creates an profile out of the cfg and stores in $MINIKUBE_HOME/profiles/<profilename>/config.json
-=======
 // CreateProfile creates a profile from the cfg and stores it in $MINIKUBE_HOME/profiles/<profilename>/<machinenane>/config.json
->>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 func CreateProfile(name string, cfg *MachineConfig, miniHome ...string) error {
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
@@ -165,11 +161,7 @@ func LoadProfile(name string, miniHome ...string) (*Profile, error) {
 	cfgs, err := DefaultLoader.LoadAllConfigFiles(name, miniHome...)
 	p := &Profile{
 		Name:   name,
-<<<<<<< HEAD
-		Config: []*MachineConfig{cfg},
-=======
 		Config: cfgs,
->>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 	}
 	return p, err
 }

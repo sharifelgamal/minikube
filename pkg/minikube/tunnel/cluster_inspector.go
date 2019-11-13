@@ -66,11 +66,7 @@ func (m *clusterInspector) getStateAndRoute() (HostState, *Route, error) {
 		return hostState, nil, err
 	}
 	var c *config.MachineConfig
-<<<<<<< HEAD
-	c, err = m.configLoader.LoadConfigFromFile(m.machineName)
-=======
 	c, err = m.configLoader.LoadConfigFromFile(viper.GetString(config.MachineProfile), m.machineName)
->>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 	if err != nil {
 		err = errors.Wrapf(err, "error loading config for %s", m.machineName)
 		return hostState, nil, err
