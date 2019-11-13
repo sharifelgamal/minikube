@@ -124,14 +124,24 @@ func encode(w io.Writer, m MinikubeConfig) error {
 }
 
 // Load loads the kubernetes and machine config for the current machine
+<<<<<<< HEAD
 func Load() (*MachineConfig, error) {
 	machine := viper.GetString(MachineProfile)
 	return DefaultLoader.LoadConfigFromFile(machine)
+=======
+func Load(machine string) (*MachineConfig, error) {
+	return DefaultLoader.LoadConfigFromFile(viper.GetString(MachineProfile), machine)
+>>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 }
 
 // Loader loads the kubernetes and machine config based on the machine profile name
 type Loader interface {
+<<<<<<< HEAD
 	LoadConfigFromFile(profile string, miniHome ...string) (*MachineConfig, error)
+=======
+	LoadConfigFromFile(profile string, machine string, miniHome ...string) (*MachineConfig, error)
+	LoadAllConfigFiles(profile string, miniHome ...string) ([]*MachineConfig, error)
+>>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 }
 
 type simpleConfigLoader struct{}
@@ -139,10 +149,14 @@ type simpleConfigLoader struct{}
 // DefaultLoader is the default config loader
 var DefaultLoader Loader = &simpleConfigLoader{}
 
+<<<<<<< HEAD
 func (c *simpleConfigLoader) LoadConfigFromFile(profileName string, miniHome ...string) (*MachineConfig, error) {
+=======
+func (c *simpleConfigLoader) LoadConfigFromFile(profile string, machine string, miniHome ...string) (*MachineConfig, error) {
+>>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 	var cc MachineConfig
 	// Move to profile package
-	path := profileFilePath(profileName, miniHome...)
+	path := profileFilePath(profile, machine, miniHome...)
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, err
@@ -157,4 +171,22 @@ func (c *simpleConfigLoader) LoadConfigFromFile(profileName string, miniHome ...
 		return nil, err
 	}
 	return &cc, nil
+}
+
+func (c *simpleConfigLoader) LoadAllConfigFiles(profile string, miniHome ...string) ([]*MachineConfig, error) {
+	var cfgs []*MachineConfig
+	machines, err := ioutil.ReadDir(ProfileFolderPath(profile, miniHome...))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, m := range machines {
+		cc, err := c.LoadConfigFromFile(profile, m.Name(), miniHome...)
+		if err != nil {
+			return nil, err
+		}
+		cfgs = append(cfgs, cc)
+	}
+
+	return cfgs, nil
 }

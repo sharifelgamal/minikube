@@ -36,7 +36,6 @@ import (
 	"github.com/docker/machine/libmachine/state"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -125,9 +124,8 @@ type Bootstrapper struct {
 }
 
 // NewKubeadmBootstrapper creates a new kubeadm.Bootstrapper
-func NewKubeadmBootstrapper(api libmachine.API) (*Bootstrapper, error) {
-	name := viper.GetString(config.MachineProfile)
-	h, err := api.Load(name)
+func NewKubeadmBootstrapper(api libmachine.API, machineName string) (*Bootstrapper, error) {
+	h, err := api.Load(machineName)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting api client")
 	}
@@ -135,7 +133,7 @@ func NewKubeadmBootstrapper(api libmachine.API) (*Bootstrapper, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "command runner")
 	}
-	return &Bootstrapper{c: runner, contextName: name}, nil
+	return &Bootstrapper{c: runner, contextName: machineName}, nil
 }
 
 // GetKubeletStatus returns the kubelet status
@@ -641,9 +639,9 @@ func NewKubeletConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, 
 }
 
 // JoinCluster adds a node to an existing cluster
-func (k *Bootstrapper) JoinCluster(k8s config.KubernetesConfig) error {
+func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig) error {
 	start := time.Now()
-	glog.Infof("JoinCluster: %+v", k8s)
+	glog.Infof("JoinCluster: %+v", cfg)
 	defer func() {
 		glog.Infof("JoinCluster complete in %s", time.Since(start))
 	}()
@@ -661,44 +659,44 @@ func (k *Bootstrapper) JoinCluster(k8s config.KubernetesConfig) error {
 
 	// Join the master by specifying its token
 	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=%s %s:%d",
-		invokeKubeadm(k8s.KubernetesVersion), k8s.BootstrapToken, strings.Join(ignore, ","), k8s.NodeIP, k8s.NodePort))
+		invokeKubeadm(cfg.KubernetesConfig.KubernetesVersion), cfg.KubernetesConfig.BootstrapToken, strings.Join(ignore, ","), cfg.KubernetesConfig.NodeIP, cfg.KubernetesConfig.NodePort))
 
 	out, err := k.c.RunCmd(cmd)
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
 	}
 
-	return k.UpdateCluster(k8s)
+	return k.UpdateCluster(cfg)
 }
 
 // UpdateCluster updates the cluster
-func (k *Bootstrapper) UpdateCluster(cfg config.KubernetesConfig) error {
-	images := images.CachedImages(cfg.ImageRepository, cfg.KubernetesVersion)
-	if cfg.ShouldLoadCachedImages {
-		if err := machine.LoadImages(k.c, images, constants.ImageCacheDir); err != nil {
+func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig) error {
+	images := images.CachedImages(cfg.KubernetesConfig.ImageRepository, cfg.KubernetesConfig.KubernetesVersion)
+	if cfg.KubernetesConfig.ShouldLoadCachedImages {
+		if err := machine.LoadImages(k.c, images, constants.ImageCacheDir, cfg.Name); err != nil {
 			out.FailureT("Unable to load cached images: {{.error}}", out.V{"error": err})
 		}
 	}
-	r, err := cruntime.New(cruntime.Config{Type: cfg.ContainerRuntime, Socket: cfg.CRISocket})
+	r, err := cruntime.New(cruntime.Config{Type: cfg.ContainerRuntime, Socket: cfg.KubernetesConfig.CRISocket})
 	if err != nil {
 		return errors.Wrap(err, "runtime")
 	}
-	kubeadmCfg, err := generateConfig(cfg, r)
+	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r)
 	if err != nil {
 		return errors.Wrap(err, "generating kubeadm cfg")
 	}
 
-	kubeletCfg, err := NewKubeletConfig(cfg, r)
+	kubeletCfg, err := NewKubeletConfig(cfg.KubernetesConfig, r)
 	if err != nil {
 		return errors.Wrap(err, "generating kubelet config")
 	}
 
-	kubeletService, err := NewKubeletService(cfg)
+	kubeletService, err := NewKubeletService(cfg.KubernetesConfig)
 	if err != nil {
 		return errors.Wrap(err, "generating kubelet service")
 	}
 
-	glog.Infof("kubelet %s config:\n%s", cfg.KubernetesVersion, kubeletCfg)
+	glog.Infof("kubelet %s config:\n%s", cfg.KubernetesConfig.KubernetesVersion, kubeletCfg)
 
 	stopCmd := exec.Command("/bin/bash", "-c", "pgrep kubelet && sudo systemctl stop kubelet")
 	// stop kubelet to avoid "Text File Busy" error
@@ -706,11 +704,11 @@ func (k *Bootstrapper) UpdateCluster(cfg config.KubernetesConfig) error {
 		glog.Warningf("unable to stop kubelet: %s command: %q output: %q", err, rr.Command(), rr.Output())
 	}
 
-	if err := transferBinaries(cfg, k.c); err != nil {
+	if err := transferBinaries(cfg.KubernetesConfig, k.c); err != nil {
 		return errors.Wrap(err, "downloading binaries")
 	}
-	files := configFiles(cfg, kubeadmCfg, kubeletCfg, kubeletService)
-	if err := addAddons(&files, assets.GenerateTemplateData(cfg)); err != nil {
+	files := configFiles(cfg.KubernetesConfig, kubeadmCfg, kubeletCfg, kubeletService)
+	if err := addAddons(&files, assets.GenerateTemplateData(cfg.KubernetesConfig)); err != nil {
 		return errors.Wrap(err, "adding addons")
 	}
 	for _, f := range files {

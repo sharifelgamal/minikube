@@ -263,12 +263,12 @@ func setupViper() {
 }
 
 // getClusterBootstrapper returns a new bootstrapper for the cluster
-func getClusterBootstrapper(api libmachine.API, bootstrapperName string) (bootstrapper.Bootstrapper, error) {
+func getClusterBootstrapper(api libmachine.API, bootstrapperName string, machine string) (bootstrapper.Bootstrapper, error) {
 	var b bootstrapper.Bootstrapper
 	var err error
 	switch bootstrapperName {
 	case bootstrapper.BootstrapperTypeKubeadm:
-		b, err = kubeadm.NewKubeadmBootstrapper(api)
+		b, err = kubeadm.NewKubeadmBootstrapper(api, machine)
 		if err != nil {
 			return nil, errors.Wrap(err, "getting kubeadm bootstrapper")
 		}

@@ -92,13 +92,13 @@ func CacheImages(images []string, cacheDir string) error {
 }
 
 // LoadImages loads previously cached images into the container runtime
-func LoadImages(cmd command.Runner, images []string, cacheDir string) error {
+func LoadImages(cmd command.Runner, images []string, cacheDir string, machine string) error {
 	glog.Infof("LoadImages start: %s", images)
 	defer glog.Infof("LoadImages end")
 
 	var g errgroup.Group
 	// Load profile cluster config from file
-	cc, err := config.Load()
+	cc, err := config.Load(machine)
 	if err != nil && !os.IsNotExist(err) {
 		glog.Errorln("Error loading profile config: ", err)
 	}
@@ -122,7 +122,7 @@ func LoadImages(cmd command.Runner, images []string, cacheDir string) error {
 }
 
 // CacheAndLoadImages caches and loads images
-func CacheAndLoadImages(images []string) error {
+func CacheAndLoadImages(images []string, machine string) error {
 	if err := CacheImages(images, constants.ImageCacheDir); err != nil {
 		return err
 	}
@@ -131,11 +131,15 @@ func CacheAndLoadImages(images []string) error {
 		return err
 	}
 	defer api.Close()
+<<<<<<< HEAD
 	cc, err := config.Load()
 	if err != nil {
 		return err
 	}
 	h, err := api.Load(cc.Name)
+=======
+	h, err := api.Load(machine)
+>>>>>>> b206bfa27447fbd082220d3f2c955d179edb338e
 	if err != nil {
 		return err
 	}
@@ -144,7 +148,7 @@ func CacheAndLoadImages(images []string) error {
 	if err != nil {
 		return err
 	}
-	return LoadImages(runner, images, constants.ImageCacheDir)
+	return LoadImages(runner, images, constants.ImageCacheDir, machine)
 }
 
 // # ParseReference cannot have a : in the directory path
