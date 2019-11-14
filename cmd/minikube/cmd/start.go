@@ -124,6 +124,7 @@ const (
 	minimumDiskSize       = "2000mb"
 	autoUpdate            = "auto-update-drivers"
 	nodes                 = "nodes"
+	machineName           = "machine"
 )
 
 var (
@@ -351,7 +352,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 
 	// setup kubeadm (must come after setupKubeconfig)
-	bs := setupKubeAdm(machineAPI, config)
+	bs := setupKubeAdm(machineAPI, config, cr)
 
 	// pull images or restart cluster
 	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade)
@@ -369,25 +370,63 @@ func runStart(cmd *cobra.Command, args []string) {
 		glog.Warningf("Failed to close machineAPI: %v", err)
 	}
 
+	// special ops for none , like change minikube directory.
+	if driverName == driver.None {
+		prepareNone()
+	}
+	waitCluster(bs, config)
+
 	n := viper.GetInt(nodes)
 	if n > 1 {
 		// Multinode?!?!
+		//bs.RestartCluster(config.KubernetesConfig)
 		for i := 1; i < n; i++ {
 			k := config
-			k.KubernetesConfig.NodeName = fmt.Sprintf("%s-%d", config.KubernetesConfig.NodeName, i)
-			k.Name = fmt.Sprintf("%s-%d", config.Name, i)
-			fmt.Printf("NEW MACHINE NAME = %s\n", k.Name)
+			k.KubernetesConfig.NodeName = fmt.Sprintf("%s-%d", config.KubernetesConfig.NodeName, i+1)
+			k.Name = fmt.Sprintf("%s-%d", config.Name, i+1)
 			if err := saveConfig(&k); err != nil {
 				exit.WithError("Failed to save config", err)
 			}
 			r, p, mAPI, h := startMachine(&k)
-			nodeCr := configureRuntimes(r, driverName, k.KubernetesConfig)
+
+			fmt.Println("Getting bootstrapper")
+			nbs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper), k.Name)
+			if err != nil {
+				exit.WithError("Failed to get bootstrapper", err)
+			}
+
+			if !p {
+				_, err = setupKubeconfig(h, &k, k.Name)
+
+				for _, eo := range extraOptions {
+					out.T(out.Option, "{{.extra_option_component_name}}.{{.key}}={{.value}}", out.V{"extra_option_component_name": eo.Component, "key": eo.Key, "value": eo.Value})
+				}
+				fmt.Println("Updating node")
+				// Loads cached images, generates config files, download binaries
+				if err := nbs.UpdateNode(k, cr); err != nil {
+					exit.WithError("Failed to update cluster", err)
+				}
+				fmt.Println("Setting up certs")
+				if err := nbs.SetupCerts(k.KubernetesConfig); err != nil {
+					exit.WithError("Failed to setup certs", err)
+				}
+			}
+			fmt.Println("Joining cluster")
+			if err := nbs.JoinCluster(k, cr); err != nil {
+				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, nbs, r))
+			}
+
+			fmt.Println("Closing libmachine API")
+			if err = mAPI.Close(); err != nil {
+				glog.Warningf("Failed to close node machineAPI: %v", err)
+			}
+			/*nodeCr := configureRuntimes(r, driverName, k.KubernetesConfig)
 
 			_, err := setupKubeconfig(h, &k, k.Name)
 			if err != nil {
 				exit.WithError("Failed to setup kubeconfig for node", err)
 			}
-			nBs := setupKubeAdm(mAPI, k)
+			nBs := setupKubeAdm(mAPI, k, nodeCr)
 			bootstrapCluster(nBs, nodeCr, r, k.KubernetesConfig, p, isUpgrade)
 			if err := nBs.JoinCluster(k); err != nil {
 				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, nBs, r))
@@ -398,15 +437,11 @@ func runStart(cmd *cobra.Command, args []string) {
 			}
 			if err = mAPI.Close(); err != nil {
 				glog.Warningf("Failed to close node machineAPI: %v", err)
-			}
+			}*/
+
 		}
 	}
 
-	// special ops for none , like change minikube directory.
-	if driverName == driver.None {
-		prepareNone()
-	}
-	waitCluster(bs, config)
 	if err := showKubectlInfo(kubeconfig, k8sVersion, config.Name); err != nil {
 		glog.Errorf("kubectl info: %v", err)
 	}
@@ -1208,7 +1243,7 @@ func getKubernetesVersion(old *cfg.MachineConfig) (string, bool) {
 }
 
 // setupKubeAdm adds any requested files into the VM before Kubernetes is started
-func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig) bootstrapper.Bootstrapper {
+func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig, cr cruntime.Manager) bootstrapper.Bootstrapper {
 	bs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper), kc.Name)
 	if err != nil {
 		exit.WithError("Failed to get bootstrapper", err)
@@ -1217,7 +1252,7 @@ func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig) bootstrapper.Bootst
 		out.T(out.Option, "{{.extra_option_component_name}}.{{.key}}={{.value}}", out.V{"extra_option_component_name": eo.Component, "key": eo.Key, "value": eo.Value})
 	}
 	// Loads cached images, generates config files, download binaries
-	if err := bs.UpdateCluster(kc); err != nil {
+	if err := bs.UpdateCluster(kc, cr); err != nil {
 		exit.WithError("Failed to update cluster", err)
 	}
 	if err := bs.SetupCerts(kc.KubernetesConfig); err != nil {

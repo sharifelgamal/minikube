@@ -23,6 +23,7 @@ import (
 	"k8s.io/minikube/pkg/minikube/bootstrapper/images"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
+	"k8s.io/minikube/pkg/minikube/cruntime"
 )
 
 // LogOptions are options to be passed to LogCommands
@@ -38,8 +39,9 @@ type Bootstrapper interface {
 	// PullImages pulls images necessary for a cluster. Success should not be required.
 	PullImages(config.KubernetesConfig) error
 	StartCluster(config.KubernetesConfig) error
-	JoinCluster(config.MachineConfig) error
-	UpdateCluster(config.MachineConfig) error
+	JoinCluster(config.MachineConfig, cruntime.Manager) error
+	UpdateCluster(config.MachineConfig, cruntime.Manager) error
+	UpdateNode(config.MachineConfig, cruntime.Manager) error
 	RestartCluster(config.KubernetesConfig) error
 	DeleteCluster(config.KubernetesConfig) error
 	WaitForPods(config.KubernetesConfig, time.Duration, []string) error

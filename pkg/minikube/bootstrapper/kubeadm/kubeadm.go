@@ -639,7 +639,7 @@ func NewKubeletConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, 
 }
 
 // JoinCluster adds a node to an existing cluster
-func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig) error {
+func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager) error {
 	start := time.Now()
 	glog.Infof("JoinCluster: %+v", cfg)
 	defer func() {
@@ -657,29 +657,36 @@ func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig) error {
 		"Swap",       // For "none" users who have swap configured
 	}
 
+	fmt.Println("kubeadm join")
+	criSocket := "/var/run/dockershim.sock"
+	if cr.Name() == "CRI-O" {
+		criSocket = "/var/run/crio/crio.sock"
+	}
+
 	// Join the master by specifying its token
-	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=%s %s:%d",
-		invokeKubeadm(cfg.KubernetesConfig.KubernetesVersion), cfg.KubernetesConfig.BootstrapToken, strings.Join(ignore, ","), cfg.KubernetesConfig.NodeIP, cfg.KubernetesConfig.NodePort))
+	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=%s --v=2 --cri-socket=%s %s:%d",
+		invokeKubeadm(cfg.KubernetesConfig.KubernetesVersion), cfg.KubernetesConfig.BootstrapToken, strings.Join(ignore, ","), criSocket, cfg.KubernetesConfig.NodeIP, cfg.KubernetesConfig.NodePort))
 
 	out, err := k.c.RunCmd(cmd)
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
 	}
 
-	return k.UpdateCluster(cfg)
+	fmt.Println("restarting kubelet")
+	if _, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", "sudo systemctl daemon-reload && sudo systemctl start kubelet")); err != nil {
+		return errors.Wrap(err, "starting kubelet")
+	}
+
+	return nil
 }
 
 // UpdateCluster updates the cluster
-func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig) error {
+func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig, r cruntime.Manager) error {
 	images := images.CachedImages(cfg.KubernetesConfig.ImageRepository, cfg.KubernetesConfig.KubernetesVersion)
 	if cfg.KubernetesConfig.ShouldLoadCachedImages {
 		if err := machine.LoadImages(k.c, images, constants.ImageCacheDir, cfg.Name); err != nil {
 			out.FailureT("Unable to load cached images: {{.error}}", out.V{"error": err})
 		}
-	}
-	r, err := cruntime.New(cruntime.Config{Type: cfg.ContainerRuntime, Socket: cfg.KubernetesConfig.CRISocket})
-	if err != nil {
-		return errors.Wrap(err, "runtime")
 	}
 	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r)
 	if err != nil {
@@ -720,6 +727,39 @@ func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig) error {
 	if _, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", "sudo systemctl daemon-reload && sudo systemctl start kubelet")); err != nil {
 		return errors.Wrap(err, "starting kubelet")
 	}
+	return nil
+}
+
+// UpdateNode updates a node, as opposed to a cluster
+func (k *Bootstrapper) UpdateNode(cfg config.MachineConfig, r cruntime.Manager) error {
+	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r)
+	if err != nil {
+		return errors.Wrap(err, "generating kubeadm cfg")
+	}
+
+	kubeletCfg, err := NewKubeletConfig(cfg.KubernetesConfig, r)
+	if err != nil {
+		return errors.Wrap(err, "generating kubelet config")
+	}
+
+	kubeletService, err := NewKubeletService(cfg.KubernetesConfig)
+	if err != nil {
+		return errors.Wrap(err, "generating kubelet service")
+	}
+
+	if err := transferBinaries(cfg.KubernetesConfig, k.c); err != nil {
+		return errors.Wrap(err, "downloading binaries")
+	}
+	files := configFiles(cfg.KubernetesConfig, kubeadmCfg, kubeletCfg, kubeletService)
+	for _, f := range files {
+		if err := k.c.Copy(f); err != nil {
+			return errors.Wrapf(err, "copy")
+		}
+	}
+	if _, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", "sudo systemctl daemon-reload && sudo systemctl start kubelet")); err != nil {
+		return errors.Wrap(err, "starting kubelet")
+	}
+
 	return nil
 }
 

@@ -42,7 +42,11 @@ var sshCmd = &cobra.Command{
 			exit.WithError("Error getting client", err)
 		}
 		defer api.Close()
-		cc, err := config.Load(viper.GetString(config.MachineProfile))
+		/*machineName := viper.GetString(config.MachineProfile)
+		if m := viper.GetString("machine"); m != "" {
+			machineName = m
+		}*/
+		cc, err := config.Load("minikube-2")
 		if err != nil {
 			exit.WithError("Error getting config", err)
 		}
@@ -71,4 +75,5 @@ var sshCmd = &cobra.Command{
 
 func init() {
 	sshCmd.Flags().Bool(nativeSSH, true, "Use native Golang SSH client (default true). Set to 'false' to use the command line 'ssh' command when accessing the docker machine. Useful for the machine drivers when they will not start with 'Waiting for SSH'.")
+	sshCmd.Flags().String(machineName, "minikube", "The machine name to ssh to, defaults to the cluster master.")
 }
