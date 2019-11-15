@@ -42,11 +42,11 @@ var sshCmd = &cobra.Command{
 			exit.WithError("Error getting client", err)
 		}
 		defer api.Close()
-		/*machineName := viper.GetString(config.MachineProfile)
+		machineName := viper.GetString(config.MachineProfile)
 		if m := viper.GetString("machine"); m != "" {
 			machineName = m
-		}*/
-		cc, err := config.Load("minikube-2")
+		}
+		cc, err := config.Load(machineName)
 		if err != nil {
 			exit.WithError("Error getting config", err)
 		}

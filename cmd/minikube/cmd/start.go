@@ -395,6 +395,8 @@ func runStart(cmd *cobra.Command, args []string) {
 				exit.WithError("Failed to get bootstrapper", err)
 			}
 
+			ncr := configureRuntimes(r, driverName, k.KubernetesConfig)
+
 			if !p {
 				_, err = setupKubeconfig(h, &k, k.Name)
 
@@ -403,7 +405,7 @@ func runStart(cmd *cobra.Command, args []string) {
 				}
 				fmt.Println("Updating node")
 				// Loads cached images, generates config files, download binaries
-				if err := nbs.UpdateNode(k, cr); err != nil {
+				if err := nbs.UpdateNode(k, ncr); err != nil {
 					exit.WithError("Failed to update cluster", err)
 				}
 				fmt.Println("Setting up certs")
@@ -412,8 +414,8 @@ func runStart(cmd *cobra.Command, args []string) {
 				}
 			}
 			fmt.Println("Joining cluster")
-			if err := nbs.JoinCluster(k, cr); err != nil {
-				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, nbs, r))
+			if err := nbs.JoinCluster(config, ncr); err != nil {
+				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(ncr, nbs, r))
 			}
 
 			fmt.Println("Closing libmachine API")

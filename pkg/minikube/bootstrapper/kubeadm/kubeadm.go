@@ -667,13 +667,14 @@ func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager
 	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=%s --v=2 --cri-socket=%s %s:%d",
 		invokeKubeadm(cfg.KubernetesConfig.KubernetesVersion), cfg.KubernetesConfig.BootstrapToken, strings.Join(ignore, ","), criSocket, cfg.KubernetesConfig.NodeIP, cfg.KubernetesConfig.NodePort))
 
+	fmt.Println(cmd)
 	out, err := k.c.RunCmd(cmd)
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
 	}
 
 	fmt.Println("restarting kubelet")
-	if _, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", "sudo systemctl daemon-reload && sudo systemctl start kubelet")); err != nil {
+	if _, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", "sudo systemctl daemon-reload && sudo systemctl enable kubelet && sudo systemctl start kubelet")); err != nil {
 		return errors.Wrap(err, "starting kubelet")
 	}
 
