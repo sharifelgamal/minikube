@@ -124,7 +124,6 @@ const (
 	minimumDiskSize       = "2000mb"
 	autoUpdate            = "auto-update-drivers"
 	nodes                 = "nodes"
-	machineName           = "machine"
 )
 
 var (
@@ -376,10 +375,23 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 	waitCluster(bs, config)
 
+	if err := showKubectlInfo(kubeconfig, k8sVersion, config.Name); err != nil {
+		glog.Errorf("kubectl info: %v", err)
+	}
+
 	n := viper.GetInt(nodes)
 	if n > 1 {
 		// Multinode?!?!
-		//bs.RestartCluster(config.KubernetesConfig)
+		joinCmd, err := bs.GenerateToken(config.KubernetesConfig)
+		if err != nil {
+			exit.WithError("Failed to generate token", err)
+		}
+		fmt.Println(joinCmd)
+
+		/*_, err = exec.Command("kubectl", "apply", "-f", "kube-flannel.yml").CombinedOutput()
+		if err != nil {
+			exit.WithError("Failed to install flannel", err)
+		}*/
 		for i := 1; i < n; i++ {
 			k := config
 			k.KubernetesConfig.NodeName = fmt.Sprintf("%s-%d", config.KubernetesConfig.NodeName, i+1)
@@ -387,7 +399,8 @@ func runStart(cmd *cobra.Command, args []string) {
 			if err := saveConfig(&k); err != nil {
 				exit.WithError("Failed to save config", err)
 			}
-			r, p, mAPI, h := startMachine(&k)
+			r, p, mAPI, _ := startMachine(&k)
+			defer mAPI.Close()
 
 			fmt.Println("Getting bootstrapper")
 			nbs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper), k.Name)
@@ -398,7 +411,7 @@ func runStart(cmd *cobra.Command, args []string) {
 			ncr := configureRuntimes(r, driverName, k.KubernetesConfig)
 
 			if !p {
-				_, err = setupKubeconfig(h, &k, k.Name)
+				//_, err = setupKubeconfig(h, &k, config.Name)
 
 				for _, eo := range extraOptions {
 					out.T(out.Option, "{{.extra_option_component_name}}.{{.key}}={{.value}}", out.V{"extra_option_component_name": eo.Component, "key": eo.Key, "value": eo.Value})
@@ -414,7 +427,7 @@ func runStart(cmd *cobra.Command, args []string) {
 				}
 			}
 			fmt.Println("Joining cluster")
-			if err := nbs.JoinCluster(config, ncr); err != nil {
+			if err := nbs.JoinCluster(config, ncr, joinCmd); err != nil {
 				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(ncr, nbs, r))
 			}
 
@@ -422,30 +435,7 @@ func runStart(cmd *cobra.Command, args []string) {
 			if err = mAPI.Close(); err != nil {
 				glog.Warningf("Failed to close node machineAPI: %v", err)
 			}
-			/*nodeCr := configureRuntimes(r, driverName, k.KubernetesConfig)
-
-			_, err := setupKubeconfig(h, &k, k.Name)
-			if err != nil {
-				exit.WithError("Failed to setup kubeconfig for node", err)
-			}
-			nBs := setupKubeAdm(mAPI, k, nodeCr)
-			bootstrapCluster(nBs, nodeCr, r, k.KubernetesConfig, p, isUpgrade)
-			if err := nBs.JoinCluster(k); err != nil {
-				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(cr, nBs, r))
-			}
-
-			if err = loadCachedImagesInConfigFile(k.Name); err != nil {
-				out.T(out.FailureType, "Unable to load cached images from config file.")
-			}
-			if err = mAPI.Close(); err != nil {
-				glog.Warningf("Failed to close node machineAPI: %v", err)
-			}*/
-
 		}
-	}
-
-	if err := showKubectlInfo(kubeconfig, k8sVersion, config.Name); err != nil {
-		glog.Errorf("kubectl info: %v", err)
 	}
 }
 
@@ -470,7 +460,7 @@ func enableAddons() {
 func waitCluster(bs bootstrapper.Bootstrapper, config cfg.MachineConfig) {
 	var podsToWaitFor []string
 
-	if !viper.GetBool(waitUntilHealthy) {
+	if !viper.GetBool(waitUntilHealthy) && viper.GetInt(nodes) == 1 {
 		// only wait for apiserver if wait=false
 		podsToWaitFor = []string{"apiserver"}
 	}

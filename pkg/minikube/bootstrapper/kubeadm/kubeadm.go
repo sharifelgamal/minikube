@@ -274,6 +274,8 @@ func (k *Bootstrapper) StartCluster(k8s config.KubernetesConfig) error {
 		ignore = append(ignore, "SystemVerification")
 	}
 
+	k.c.RunCmd(exec.Command("/bin/bash", "-c", "systemctl", "disable", "firewalld", "--now"))
+
 	c := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s init --config %s %s --ignore-preflight-errors=%s", invokeKubeadm(k8s.KubernetesVersion), yamlConfigPath, extraFlags, strings.Join(ignore, ",")))
 	if rr, err := k.c.RunCmd(c); err != nil {
 		return errors.Wrapf(err, "init failed. cmd: %q", rr.Command())
@@ -639,38 +641,19 @@ func NewKubeletConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, 
 }
 
 // JoinCluster adds a node to an existing cluster
-func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager) error {
+func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager, joinCmd string) error {
 	start := time.Now()
 	glog.Infof("JoinCluster: %+v", cfg)
 	defer func() {
 		glog.Infof("JoinCluster complete in %s", time.Since(start))
 	}()
 
-	ignore := []string{
-		fmt.Sprintf("DirAvailable-%s", strings.Replace(vmpath.GuestManifestsDir, "/", "-", -1)),
-		fmt.Sprintf("DirAvailable-%s", strings.Replace(vmpath.GuestPersistentDir, "/", "-", -1)),
-		"FileAvailable--etc-kubernetes-manifests-kube-scheduler.yaml",
-		"FileAvailable--etc-kubernetes-manifests-kube-apiserver.yaml",
-		"FileAvailable--etc-kubernetes-manifests-kube-controller-manager.yaml",
-		"FileAvailable--etc-kubernetes-manifests-etcd.yaml",
-		"Port-10250", // For "none" users who already have a kubelet online
-		"Swap",       // For "none" users who have swap configured
-	}
-
 	fmt.Println("kubeadm join")
-	criSocket := "/var/run/dockershim.sock"
-	if cr.Name() == "CRI-O" {
-		criSocket = "/var/run/crio/crio.sock"
-	}
-
 	// Join the master by specifying its token
-	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s join --token %s --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=%s --v=2 --cri-socket=%s %s:%d",
-		invokeKubeadm(cfg.KubernetesConfig.KubernetesVersion), cfg.KubernetesConfig.BootstrapToken, strings.Join(ignore, ","), criSocket, cfg.KubernetesConfig.NodeIP, cfg.KubernetesConfig.NodePort))
-
-	fmt.Println(cmd)
-	out, err := k.c.RunCmd(cmd)
+	fmt.Println(joinCmd)
+	out, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", joinCmd))
 	if err != nil {
-		return errors.Wrapf(err, "cmd failed: %s\n%s\n", cmd, out)
+		return errors.Wrapf(err, "cmd failed: %s\n%s\n", joinCmd, out)
 	}
 
 	fmt.Println("restarting kubelet")
@@ -679,6 +662,20 @@ func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager
 	}
 
 	return nil
+}
+
+// GenerateToken creates a token and returns the appropriate kubeadm join command to run
+func (k *Bootstrapper) GenerateToken(k8s config.KubernetesConfig) (string, error) {
+	tokenCmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s token create --print-join-command --ttl=0", invokeKubeadm(k8s.KubernetesVersion)))
+	r, err := k.c.RunCmd(tokenCmd)
+	if err != nil {
+		return "", errors.Wrap(err, "generating bootstrap token")
+	}
+	joinCmd := r.Stdout.String()
+	joinCmd = strings.Replace(joinCmd, "kubeadm", invokeKubeadm(k8s.KubernetesVersion), 1)
+	joinCmd = fmt.Sprintf("%s --ignore-preflight-errors=all", strings.TrimSpace(joinCmd))
+
+	return joinCmd, nil
 }
 
 // UpdateCluster updates the cluster
@@ -823,6 +820,7 @@ func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, er
 		FeatureArgs       map[string]bool
 		NoTaintMaster     bool
 		BootstrapToken    string
+		NodeIP            string
 	}{
 		CertDir:           vmpath.GuestCertsDir,
 		ServiceCIDR:       util.DefaultServiceCIDR,
@@ -839,6 +837,7 @@ func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, er
 		NoTaintMaster:     false, // That does not work with k8s 1.12+
 		DNSDomain:         k8s.DNSDomain,
 		BootstrapToken:    k8s.BootstrapToken,
+		NodeIP:            k8s.NodeIP,
 	}
 
 	if k8s.ServiceCIDR != "" {

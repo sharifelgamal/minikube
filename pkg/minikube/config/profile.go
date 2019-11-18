@@ -18,7 +18,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -189,8 +188,6 @@ func profileFilePath(profile string, machine string, miniHome ...string) string 
 		miniPath = miniHome[0]
 	}
 
-	//debug.PrintStack()
-	fmt.Printf("PROFILE=%s, MACHINE=%s\n", profile, machine)
 	return filepath.Join(miniPath, "profiles", profile, machine, "config.json")
 }
 

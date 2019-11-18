@@ -51,6 +51,7 @@ var KubeconfigStatus = struct {
 
 // Status represents the status
 type Status struct {
+	Name       string
 	Host       string
 	Kubelet    string
 	APIServer  string
@@ -61,10 +62,12 @@ const (
 	minikubeNotRunningStatusFlag = 1 << 0
 	clusterNotRunningStatusFlag  = 1 << 1
 	k8sNotRunningStatusFlag      = 1 << 2
-	defaultStatusFormat          = `host: {{.Host}}
+	defaultStatusFormat          = `name: {{.Name}}
+host: {{.Host}}
 kubelet: {{.Kubelet}}
 apiserver: {{.APIServer}}
 kubeconfig: {{.Kubeconfig}}
+
 `
 )
 
@@ -88,74 +91,86 @@ var statusCmd = &cobra.Command{
 		}
 		defer api.Close()
 
-		machineName := viper.GetString(config.MachineProfile)
+		profile := viper.GetString(config.MachineProfile)
 
-		hostSt, err := cluster.GetHostStatus(api, machineName)
+		cfgs, err := config.DefaultLoader.LoadAllConfigFiles(profile)
 		if err != nil {
-			exit.WithError("Error getting host status", err)
+			exit.WithError("Error getting config files", err)
 		}
 
-		kubeletSt := state.None.String()
-		kubeconfigSt := state.None.String()
-		apiserverSt := state.None.String()
+		statuses := []Status{}
 
-		if hostSt == state.Running.String() {
-			clusterBootstrapper, err := getClusterBootstrapper(api, viper.GetString(cmdcfg.Bootstrapper), machineName)
+		for _, c := range cfgs {
+			hostSt, err := cluster.GetHostStatus(api, c.Name)
 			if err != nil {
-				exit.WithError("Error getting bootstrapper", err)
-			}
-			kubeletSt, err = clusterBootstrapper.GetKubeletStatus()
-			if err != nil {
-				glog.Warningf("kubelet err: %v", err)
-				returnCode |= clusterNotRunningStatusFlag
-			} else if kubeletSt != state.Running.String() {
-				returnCode |= clusterNotRunningStatusFlag
+				exit.WithError("Error getting host status", err)
 			}
 
-			ip, err := cluster.GetHostDriverIP(api, machineName)
-			if err != nil {
-				glog.Errorln("Error host driver ip status:", err)
-			}
+			kubeletSt := state.None.String()
+			kubeconfigSt := state.None.String()
+			apiserverSt := state.None.String()
 
-			apiserverPort, err := kubeconfig.Port(machineName)
-			if err != nil {
-				// Fallback to presuming default apiserver port
-				apiserverPort = constants.APIServerPort
-			}
+			if hostSt == state.Running.String() {
+				clusterBootstrapper, err := getClusterBootstrapper(api, viper.GetString(cmdcfg.Bootstrapper), c.Name)
+				if err != nil {
+					exit.WithError("Error getting bootstrapper", err)
+				}
+				kubeletSt, err = clusterBootstrapper.GetKubeletStatus()
+				if err != nil {
+					glog.Warningf("kubelet err: %v", err)
+					returnCode |= clusterNotRunningStatusFlag
+				} else if kubeletSt != state.Running.String() {
+					returnCode |= clusterNotRunningStatusFlag
+				}
 
-			apiserverSt, err = clusterBootstrapper.GetAPIServerStatus(ip, apiserverPort)
-			if err != nil {
-				glog.Errorln("Error apiserver status:", err)
-			} else if apiserverSt != state.Running.String() {
-				returnCode |= clusterNotRunningStatusFlag
-			}
+				ip, err := cluster.GetHostDriverIP(api, c.Name)
+				if err != nil {
+					glog.Errorln("Error host driver ip status:", err)
+				}
 
-			ks, err := kubeconfig.IsClusterInConfig(ip, machineName)
-			if err != nil {
-				glog.Errorln("Error kubeconfig status:", err)
-			}
-			if ks {
-				kubeconfigSt = KubeconfigStatus.Configured
+				apiserverPort, err := kubeconfig.Port(c.Name)
+				if err != nil {
+					// Fallback to presuming default apiserver port
+					apiserverPort = constants.APIServerPort
+				}
+
+				apiserverSt, err = clusterBootstrapper.GetAPIServerStatus(ip, apiserverPort)
+				if err != nil {
+					glog.Errorln("Error apiserver status:", err)
+				} else if apiserverSt != state.Running.String() {
+					returnCode |= clusterNotRunningStatusFlag
+				}
+
+				ks, err := kubeconfig.IsClusterInConfig(ip, c.Name)
+				if err != nil {
+					glog.Errorln("Error kubeconfig status:", err)
+				}
+				if ks {
+					kubeconfigSt = KubeconfigStatus.Configured
+				} else {
+					kubeconfigSt = KubeconfigStatus.Misconfigured
+					returnCode |= k8sNotRunningStatusFlag
+				}
 			} else {
-				kubeconfigSt = KubeconfigStatus.Misconfigured
-				returnCode |= k8sNotRunningStatusFlag
+				returnCode |= minikubeNotRunningStatusFlag
 			}
-		} else {
-			returnCode |= minikubeNotRunningStatusFlag
-		}
 
-		status := Status{
-			Host:       hostSt,
-			Kubelet:    kubeletSt,
-			APIServer:  apiserverSt,
-			Kubeconfig: kubeconfigSt,
+			status := Status{
+				Name:       c.Name,
+				Host:       hostSt,
+				Kubelet:    kubeletSt,
+				APIServer:  apiserverSt,
+				Kubeconfig: kubeconfigSt,
+			}
+
+			statuses = append(statuses, status)
 		}
 
 		switch strings.ToLower(output) {
 		case "text":
-			printStatusText(status)
+			printStatusText(statuses)
 		case "json":
-			printStatusJSON(status)
+			printStatusJSON(statuses)
 		default:
 			exit.WithCodeT(exit.BadUsage, fmt.Sprintf("invalid output format: %s. Valid values: 'text', 'json'", output))
 		}
@@ -172,25 +187,28 @@ For the list accessible variables for the template, see the struct values here: 
 		`minikube status --output OUTPUT. json, text`)
 }
 
-var printStatusText = func(status Status) {
-	tmpl, err := template.New("status").Parse(statusFormat)
-	if err != nil {
-		exit.WithError("Error creating status template", err)
-	}
-	err = tmpl.Execute(os.Stdout, status)
-	if err != nil {
-		exit.WithError("Error executing status template", err)
-	}
-	if status.Kubeconfig == KubeconfigStatus.Misconfigured {
-		out.WarningT("Warning: Your kubectl is pointing to stale minikube-vm.\nTo fix the kubectl context, run `minikube update-context`")
+var printStatusText = func(s []Status) {
+	for _, status := range s {
+		tmpl, err := template.New("status").Parse(statusFormat)
+		if err != nil {
+			exit.WithError("Error creating status template", err)
+		}
+		err = tmpl.Execute(os.Stdout, status)
+		if err != nil {
+			exit.WithError("Error executing status template", err)
+		}
+		if status.Kubeconfig == KubeconfigStatus.Misconfigured {
+			out.WarningT("Warning: Your kubectl is pointing to stale minikube-vm.\nTo fix the kubectl context, run `minikube update-context`")
+		}
 	}
 }
 
-var printStatusJSON = func(status Status) {
-
-	jsonString, err := json.Marshal(status)
-	if err != nil {
-		exit.WithError("Error converting status to json", err)
+var printStatusJSON = func(s []Status) {
+	for _, status := range s {
+		jsonString, err := json.Marshal(status)
+		if err != nil {
+			exit.WithError("Error converting status to json", err)
+		}
+		out.String(string(jsonString))
 	}
-	out.String(string(jsonString))
 }

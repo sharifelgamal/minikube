@@ -81,7 +81,7 @@ kind: ClusterConfiguration
 {{end -}}
 certificatesDir: {{.CertDir}}
 clusterName: kubernetes
-controlPlaneEndpoint: localhost:{{.APIServerPort}}
+controlPlaneEndpoint: {{.NodeIP}}:{{.APIServerPort}}
 etcd:
   local:
     dataDir: {{.EtcdDataDir}}
@@ -134,7 +134,7 @@ kind: ClusterConfiguration
 {{end -}}{{end -}}
 certificatesDir: {{.CertDir}}
 clusterName: kubernetes
-controlPlaneEndpoint: localhost:{{.APIServerPort}}
+controlPlaneEndpoint: {{.NodeIP}}:{{.APIServerPort}}
 dns:
   type: CoreDNS
 etcd:

@@ -39,10 +39,11 @@ type Bootstrapper interface {
 	// PullImages pulls images necessary for a cluster. Success should not be required.
 	PullImages(config.KubernetesConfig) error
 	StartCluster(config.KubernetesConfig) error
-	JoinCluster(config.MachineConfig, cruntime.Manager) error
+	JoinCluster(config.MachineConfig, cruntime.Manager, string) error
 	UpdateCluster(config.MachineConfig, cruntime.Manager) error
 	UpdateNode(config.MachineConfig, cruntime.Manager) error
 	RestartCluster(config.KubernetesConfig) error
+	GenerateToken(config.KubernetesConfig) (string, error)
 	DeleteCluster(config.KubernetesConfig) error
 	WaitForPods(config.KubernetesConfig, time.Duration, []string) error
 	// LogCommands returns a map of log type to a command which will display that log.
