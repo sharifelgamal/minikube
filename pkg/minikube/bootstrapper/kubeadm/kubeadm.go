@@ -276,7 +276,7 @@ func (k *Bootstrapper) StartCluster(k8s config.KubernetesConfig) error {
 
 	k.c.RunCmd(exec.Command("/bin/bash", "-c", "systemctl", "disable", "firewalld", "--now"))
 
-	c := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s init --config %s %s --ignore-preflight-errors=%s", invokeKubeadm(k8s.KubernetesVersion), yamlConfigPath, extraFlags, strings.Join(ignore, ",")))
+	c := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s init --config %s %s --ignore-preflight-errors=%s --node-name=%s", invokeKubeadm(k8s.KubernetesVersion), yamlConfigPath, extraFlags, strings.Join(ignore, ","), k8s.NodeName))
 	if rr, err := k.c.RunCmd(c); err != nil {
 		return errors.Wrapf(err, "init failed. cmd: %q", rr.Command())
 	}
@@ -651,7 +651,7 @@ func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager
 	fmt.Println("kubeadm join")
 	// Join the master by specifying its token
 	fmt.Println(joinCmd)
-	out, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", joinCmd))
+	out, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", fmt.Sprintf("%s --v=5 --node-name=%s", joinCmd, cfg.KubernetesConfig.NodeName)))
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", joinCmd, out)
 	}

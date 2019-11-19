@@ -460,7 +460,7 @@ func enableAddons() {
 func waitCluster(bs bootstrapper.Bootstrapper, config cfg.MachineConfig) {
 	var podsToWaitFor []string
 
-	if !viper.GetBool(waitUntilHealthy) && viper.GetInt(nodes) == 1 {
+	if !viper.GetBool(waitUntilHealthy) {
 		// only wait for apiserver if wait=false
 		podsToWaitFor = []string{"apiserver"}
 	}
