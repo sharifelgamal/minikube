@@ -45,7 +45,7 @@ type Bootstrapper interface {
 	RestartCluster(config.KubernetesConfig) error
 	GenerateToken(config.KubernetesConfig) (string, error)
 	DeleteCluster(config.KubernetesConfig) error
-	WaitForPods(config.KubernetesConfig, time.Duration, []string) error
+	WaitForCluster(config.KubernetesConfig, time.Duration) error
 	// LogCommands returns a map of log type to a command which will display that log.
 	LogCommands(LogOptions) map[string]string
 	SetupCerts(cfg config.KubernetesConfig) error

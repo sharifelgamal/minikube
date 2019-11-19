@@ -173,7 +173,7 @@ func initMinikubeFlags() {
 	startCmd.Flags().String(criSocket, "", "The cri socket path to be used.")
 	startCmd.Flags().String(networkPlugin, "", "The name of the network plugin.")
 	startCmd.Flags().Bool(enableDefaultCNI, false, "Enable the default CNI plugin (/etc/cni/net.d/k8s.conf). Used in conjunction with \"--network-plugin=cni\".")
-	startCmd.Flags().Bool(waitUntilHealthy, false, "Wait until Kubernetes core services are healthy before exiting.")
+	startCmd.Flags().Bool(waitUntilHealthy, true, "Block until the apiserver is servicing API requests")
 	startCmd.Flags().Duration(waitTimeout, 6*time.Minute, "max time to wait per Kubernetes core services to be healthy.")
 	startCmd.Flags().Bool(nativeSSH, true, "Use native Golang SSH client (default true). Set to 'false' to use the command line 'ssh' command when accessing the docker machine. Useful for the machine drivers when they will not start with 'Waiting for SSH'.")
 	startCmd.Flags().Bool(autoUpdate, true, "If set, automatically updates drivers to the latest version. Defaults to true.")
@@ -373,7 +373,13 @@ func runStart(cmd *cobra.Command, args []string) {
 	if driverName == driver.None {
 		prepareNone()
 	}
-	waitCluster(bs, config)
+
+	// Skip pre-existing, because we already waited for health
+	if viper.GetBool(waitUntilHealthy) && !preExists {
+		if err := bs.WaitForCluster(config.KubernetesConfig, viper.GetDuration(waitTimeout)); err != nil {
+			exit.WithError("Wait failed", err)
+		}
+	}
 
 	if err := showKubectlInfo(kubeconfig, k8sVersion, config.Name); err != nil {
 		glog.Errorf("kubectl info: %v", err)
@@ -454,18 +460,6 @@ func enableAddons() {
 		if err != nil {
 			exit.WithError("addon enable failed", err)
 		}
-	}
-}
-
-func waitCluster(bs bootstrapper.Bootstrapper, config cfg.MachineConfig) {
-	var podsToWaitFor []string
-
-	if !viper.GetBool(waitUntilHealthy) {
-		// only wait for apiserver if wait=false
-		podsToWaitFor = []string{"apiserver"}
-	}
-	if err := bs.WaitForPods(config.KubernetesConfig, viper.GetDuration(waitTimeout), podsToWaitFor); err != nil {
-		exit.WithError("Wait failed", err)
 	}
 }
 
@@ -1130,8 +1124,19 @@ func validateNetwork(h *host.Host, r command.Runner) string {
 
 func trySSH(h *host.Host, ip string) {
 	sshAddr := fmt.Sprintf("%s:22", ip)
-	conn, err := net.Dial("tcp", sshAddr)
-	if err != nil {
+
+	dial := func() (err error) {
+		d := net.Dialer{Timeout: 3 * time.Second}
+		conn, err := d.Dial("tcp", sshAddr)
+		if err != nil {
+			out.WarningT("Unable to verify SSH connectivity: {{.error}}. Will retry...", out.V{"error": err})
+			return err
+		}
+		_ = conn.Close()
+		return nil
+	}
+
+	if err := retry.Expo(dial, time.Second, 13*time.Second); err != nil {
 		exit.WithCodeT(exit.IO, `minikube is unable to connect to the VM: {{.error}}
 
 This is likely due to one of two reasons:
@@ -1146,7 +1151,6 @@ Suggested workarounds:
 - Restart or reinstall {{.hypervisor}}
 - Use an alternative --vm-driver`, out.V{"error": err, "hypervisor": h.Driver.DriverName(), "ip": ip})
 	}
-	defer conn.Close()
 }
 
 func tryLookup(r command.Runner) {
@@ -1275,22 +1279,11 @@ func configureRuntimes(runner cruntime.CommandRunner, drvName string, k8s cfg.Ku
 
 // bootstrapCluster starts Kubernetes using the chosen bootstrapper
 func bootstrapCluster(bs bootstrapper.Bootstrapper, r cruntime.Manager, runner command.Runner, kc cfg.KubernetesConfig, preexisting bool, isUpgrade bool) {
-	// hum. bootstrapper.Bootstrapper should probably have a Name function.
-	bsName := viper.GetString(cmdcfg.Bootstrapper)
-
 	if isUpgrade || !preexisting {
 		out.T(out.Pulling, "Pulling images ...")
 		if err := bs.PullImages(kc); err != nil {
 			out.T(out.FailureType, "Unable to pull images, which may be OK: {{.error}}", out.V{"error": err})
 		}
-	}
-
-	if preexisting {
-		out.T(out.Restarting, "Relaunching Kubernetes using {{.bootstrapper}} ... ", out.V{"bootstrapper": bsName})
-		if err := bs.RestartCluster(kc); err != nil {
-			exit.WithLogEntries("Error restarting cluster", err, logs.FindProblems(r, bs, runner))
-		}
-		return
 	}
 
 	out.T(out.Launch, "Launching Kubernetes ... ")
