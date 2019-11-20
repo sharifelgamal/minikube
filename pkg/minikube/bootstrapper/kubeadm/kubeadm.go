@@ -36,6 +36,7 @@ import (
 	"github.com/docker/machine/libmachine/state"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -569,7 +570,7 @@ func (k *Bootstrapper) PullImages(k8s config.KubernetesConfig) error {
 }
 
 // SetupCerts sets up certificates within the cluster.
-func (k *Bootstrapper) SetupCerts(k8s config.KubernetesConfig) error {
+func (k *Bootstrapper) SetupCerts(k8s config.KubernetesConfig) ([]assets.CopyableFile, error) {
 	return bootstrapper.SetupCerts(k.c, k8s)
 }
 
@@ -629,7 +630,7 @@ func NewKubeletConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, 
 }
 
 // JoinCluster adds a node to an existing cluster
-func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager, joinCmd string) error {
+func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager, joinCmd string, nodeName string) error {
 	start := time.Now()
 	glog.Infof("JoinCluster: %+v", cfg)
 	defer func() {
@@ -638,8 +639,9 @@ func (k *Bootstrapper) JoinCluster(cfg config.MachineConfig, cr cruntime.Manager
 
 	fmt.Println("kubeadm join")
 	// Join the master by specifying its token
+	joinCmd = fmt.Sprintf("%s --v=10 --node-name=%s", joinCmd, nodeName)
 	fmt.Println(joinCmd)
-	out, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", fmt.Sprintf("%s --v=5 --node-name=%s", joinCmd, cfg.KubernetesConfig.NodeName)))
+	out, err := k.c.RunCmd(exec.Command("/bin/bash", "-c", joinCmd))
 	if err != nil {
 		return errors.Wrapf(err, "cmd failed: %s\n%s\n", joinCmd, out)
 	}
@@ -674,7 +676,7 @@ func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig, r cruntime.Manage
 			out.FailureT("Unable to load cached images: {{.error}}", out.V{"error": err})
 		}
 	}
-	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r)
+	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r, cfg.KubernetesConfig.NodeIP)
 	if err != nil {
 		return errors.Wrap(err, "generating kubeadm cfg")
 	}
@@ -717,8 +719,8 @@ func (k *Bootstrapper) UpdateCluster(cfg config.MachineConfig, r cruntime.Manage
 }
 
 // UpdateNode updates a node, as opposed to a cluster
-func (k *Bootstrapper) UpdateNode(cfg config.MachineConfig, r cruntime.Manager) error {
-	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r)
+func (k *Bootstrapper) UpdateNode(cfg config.MachineConfig, r cruntime.Manager, masterNodeIP string) error {
+	kubeadmCfg, err := generateConfig(cfg.KubernetesConfig, r, masterNodeIP)
 	if err != nil {
 		return errors.Wrap(err, "generating kubeadm cfg")
 	}
@@ -769,7 +771,7 @@ func createExtraComponentConfig(extraOptions config.ExtraOptionSlice, version se
 }
 
 // generateConfig generates the kubeadm.yaml file
-func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, error) {
+func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager, masterNodeIP string) ([]byte, error) {
 	version, err := parseKubernetesVersion(k8s.KubernetesVersion)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing kubernetes version")
@@ -807,8 +809,9 @@ func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, er
 		ExtraArgs         []ComponentExtraArgs
 		FeatureArgs       map[string]bool
 		NoTaintMaster     bool
-		BootstrapToken    string
 		NodeIP            string
+		MasterNodeIP      string
+		ClusterName       string
 	}{
 		CertDir:           vmpath.GuestCertsDir,
 		ServiceCIDR:       util.DefaultServiceCIDR,
@@ -824,8 +827,9 @@ func generateConfig(k8s config.KubernetesConfig, r cruntime.Manager) ([]byte, er
 		FeatureArgs:       kubeadmFeatureArgs,
 		NoTaintMaster:     false, // That does not work with k8s 1.12+
 		DNSDomain:         k8s.DNSDomain,
-		BootstrapToken:    k8s.BootstrapToken,
 		NodeIP:            k8s.NodeIP,
+		MasterNodeIP:      masterNodeIP,
+		ClusterName:       viper.GetString(config.MachineProfile),
 	}
 
 	if k8s.ServiceCIDR != "" {

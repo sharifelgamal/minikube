@@ -46,7 +46,6 @@ nodeName: {{.NodeName}}
   {{$val}}{{end}}
 {{end}}{{if .FeatureArgs}}featureGates: {{range $i, $val := .FeatureArgs}}
   {{$i}}: {{$val}}{{end}}
-{{if .BootstrapToken}}token: {{.BootstrapToken}}{{end}}
 {{end}}`))
 
 // configTmplV1Alpha3 is for Kubernetes v1.12
@@ -58,7 +57,6 @@ apiEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
-  - token: {{.BootstrapToken}}
   - groups:
       - system:bootstrappers:kubeadm:default-node-token
     ttl: 24h0m0s
@@ -68,6 +66,8 @@ bootstrapTokens:
 nodeRegistration:
   criSocket: {{if .CRISocket}}{{.CRISocket}}{{else}}/var/run/dockershim.sock{{end}}
   name: {{.NodeName}}
+  kubeletExtraArgs:
+    node-ip: {{.NodeIP}}
   taints: []
 ---
 apiVersion: kubeadm.k8s.io/v1alpha3
@@ -80,8 +80,8 @@ kind: ClusterConfiguration
   {{$i}}: {{$val}}{{end}}
 {{end -}}
 certificatesDir: {{.CertDir}}
-clusterName: kubernetes
-controlPlaneEndpoint: {{.NodeIP}}:{{.APIServerPort}}
+clusterName: {{.ClusterName}}
+controlPlaneEndpoint: {{.MasterNodeIP}}:{{.APIServerPort}}
 etcd:
   local:
     dataDir: {{.EtcdDataDir}}
@@ -108,7 +108,6 @@ localAPIEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
-  - token: {{.BootstrapToken}}
   - groups:
       - system:bootstrappers:kubeadm:default-node-token
     ttl: 24h0m0s
@@ -118,6 +117,8 @@ bootstrapTokens:
 nodeRegistration:
   criSocket: {{if .CRISocket}}{{.CRISocket}}{{else}}/var/run/dockershim.sock{{end}}
   name: {{.NodeName}}
+  kubeletExtraArgs:
+    node-ip: {{.NodeIP}}
   taints: []
 ---
 apiVersion: kubeadm.k8s.io/v1beta1
@@ -133,8 +134,8 @@ kind: ClusterConfiguration
 {{range $i, $val := .FeatureArgs}}{{$i}}: {{$val}}
 {{end -}}{{end -}}
 certificatesDir: {{.CertDir}}
-clusterName: kubernetes
-controlPlaneEndpoint: {{.NodeIP}}:{{.APIServerPort}}
+clusterName: {{.ClusterName}}
+controlPlaneEndpoint: {{.MasterNodeIP}}:{{.APIServerPort}}
 dns:
   type: CoreDNS
 etcd:

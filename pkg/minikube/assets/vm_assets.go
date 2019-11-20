@@ -38,6 +38,7 @@ type CopyableFile interface {
 	GetTargetName() string
 	GetPermissions() string
 	GetModTime() (time.Time, error)
+	Seek(int64, int) (int64, error)
 }
 
 // BaseAsset is the base asset class
@@ -76,12 +77,16 @@ func (b *BaseAsset) GetModTime() (time.Time, error) {
 // FileAsset is an asset using a file
 type FileAsset struct {
 	BaseAsset
-	reader io.Reader
+	reader *io.SectionReader
 }
 
 // NewMemoryAssetTarget creates a new MemoryAsset, with target
 func NewMemoryAssetTarget(d []byte, targetPath, permissions string) *MemoryAsset {
 	return NewMemoryAsset(d, path.Dir(targetPath), path.Base(targetPath), permissions)
+}
+
+func (b *BaseAsset) Seek(offset int64, whence int) (int64, error) {
+	return 0, nil
 }
 
 // NewFileAsset creates a new FileAsset
@@ -91,6 +96,12 @@ func NewFileAsset(src, targetDir, targetName, permissions string) (*FileAsset, e
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error opening file asset: %s", src)
 	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error getting info for %s", src)
+	}
+	l := info.Size()
+	r := io.NewSectionReader(f, 0, l)
 	return &FileAsset{
 		BaseAsset: BaseAsset{
 			AssetName:   src,
@@ -98,7 +109,7 @@ func NewFileAsset(src, targetDir, targetName, permissions string) (*FileAsset, e
 			TargetName:  targetName,
 			Permissions: permissions,
 		},
-		reader: f,
+		reader: r,
 	}, nil
 }
 
@@ -109,6 +120,11 @@ func (f *FileAsset) GetLength() (flen int) {
 		return 0
 	}
 	return int(fi.Size())
+}
+
+// Seek implements SecionReader.Seek
+func (f *FileAsset) Seek(offset int64, whence int) (int64, error) {
+	return f.reader.Seek(offset, whence)
 }
 
 // GetModTime returns modification time of the file
@@ -195,6 +211,10 @@ func defaultValue(defValue string, val interface{}) string {
 		return defValue
 	}
 	return strVal
+}
+
+func (m *BinAsset) Seek(offset int64, whence int) (int64, error) {
+	return 0, nil
 }
 
 func (m *BinAsset) loadData(isTemplate bool) error {

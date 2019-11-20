@@ -20,6 +20,7 @@ import (
 	"net"
 	"time"
 
+	"k8s.io/minikube/pkg/minikube/assets"
 	"k8s.io/minikube/pkg/minikube/bootstrapper/images"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
@@ -39,16 +40,15 @@ type Bootstrapper interface {
 	// PullImages pulls images necessary for a cluster. Success should not be required.
 	PullImages(config.KubernetesConfig) error
 	StartCluster(config.KubernetesConfig) error
-	JoinCluster(config.MachineConfig, cruntime.Manager, string) error
+	JoinCluster(config.MachineConfig, cruntime.Manager, string, string) error
 	UpdateCluster(config.MachineConfig, cruntime.Manager) error
-	UpdateNode(config.MachineConfig, cruntime.Manager) error
-	RestartCluster(config.KubernetesConfig) error
+	UpdateNode(config.MachineConfig, cruntime.Manager, string) error
 	GenerateToken(config.KubernetesConfig) (string, error)
 	DeleteCluster(config.KubernetesConfig) error
 	WaitForCluster(config.KubernetesConfig, time.Duration) error
 	// LogCommands returns a map of log type to a command which will display that log.
 	LogCommands(LogOptions) map[string]string
-	SetupCerts(cfg config.KubernetesConfig) error
+	SetupCerts(cfg config.KubernetesConfig) ([]assets.CopyableFile, error)
 	GetKubeletStatus() (string, error)
 	GetAPIServerStatus(net.IP, int) (string, error)
 }

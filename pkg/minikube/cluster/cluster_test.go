@@ -423,7 +423,7 @@ func TestCreateSSHShell(t *testing.T) {
 	api.Hosts[viper.GetString("profile")] = &host.Host{Driver: d}
 
 	cliArgs := []string{"exit"}
-	if err := CreateSSHShell(api, cliArgs); err != nil {
+	if err := CreateSSHShell(api, viper.GetString("profile"), cliArgs); err != nil {
 		t.Fatalf("Error running ssh command: %v", err)
 	}
 

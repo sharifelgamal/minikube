@@ -63,7 +63,7 @@ var sshCmd = &cobra.Command{
 			ssh.SetDefaultClient(ssh.External)
 		}
 
-		err = cluster.CreateSSHShell(api, args)
+		err = cluster.CreateSSHShell(api, machineName, args)
 		if err != nil {
 			// This is typically due to a non-zero exit code, so no need for flourish.
 			out.ErrLn("ssh: %v", err)
@@ -75,6 +75,6 @@ var sshCmd = &cobra.Command{
 
 func init() {
 	sshCmd.Flags().Bool(nativeSSH, true, "Use native Golang SSH client (default true). Set to 'false' to use the command line 'ssh' command when accessing the docker machine. Useful for the machine drivers when they will not start with 'Waiting for SSH'.")
-	sshCmd.Flags().String("machine", "", "The machine name to ssh to, defaults to the cluster master.")
+	sshCmd.Flags().StringP("machine", "m", "", "The machine name to ssh to, defaults to the cluster master.")
 	viper.BindPFlag("machine", sshCmd.Flags().Lookup("machine"))
 }

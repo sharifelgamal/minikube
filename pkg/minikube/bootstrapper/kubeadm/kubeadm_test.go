@@ -264,7 +264,7 @@ func TestGenerateConfigDNS(t *testing.T) {
 				cfg.NodeName = "mk"
 				cfg.KubernetesVersion = version + ".0"
 
-				got, err := generateConfig(cfg, runtime)
+				got, err := generateConfig(cfg, runtime, "1.1.1.1")
 				if err != nil && !tc.shouldErr {
 					t.Fatalf("got unexpected error generating config: %v", err)
 				}
@@ -332,7 +332,7 @@ func TestGenerateConfig(t *testing.T) {
 				cfg.NodeName = "mk"
 				cfg.KubernetesVersion = version + ".0"
 
-				got, err := generateConfig(cfg, runtime)
+				got, err := generateConfig(cfg, runtime, "1.1.1.1")
 				if err != nil && !tc.shouldErr {
 					t.Fatalf("got unexpected error generating config: %v", err)
 				}

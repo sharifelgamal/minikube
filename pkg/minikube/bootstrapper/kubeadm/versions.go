@@ -28,7 +28,6 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/kubernetes/cmd/kubeadm/app/features"
 	"k8s.io/minikube/pkg/minikube/config"
-	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/vmpath"
 	"k8s.io/minikube/pkg/util"
 )
@@ -204,7 +203,6 @@ var versionSpecificOpts = []config.VersionedExtraOption{
 		},
 		LessThanOrEqual: semver.MustParse("1.9.10"),
 	},
-	config.NewUnversionedOption(Kubelet, "hostname-override", constants.DefaultNodeName),
 
 	// System pods args
 	config.NewUnversionedOption(Kubelet, "pod-manifest-path", vmpath.GuestManifestsDir),

@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/blang/semver"
-	"github.com/dchest/uniuri"
 	"github.com/docker/machine/libmachine"
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/ssh"
@@ -47,6 +46,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 	cmdcfg "k8s.io/minikube/cmd/minikube/cmd/config"
+	"k8s.io/minikube/pkg/minikube/assets"
 	"k8s.io/minikube/pkg/minikube/bootstrapper"
 	"k8s.io/minikube/pkg/minikube/bootstrapper/images"
 	"k8s.io/minikube/pkg/minikube/bootstrapper/kubeadm"
@@ -336,22 +336,26 @@ func runStart(cmd *cobra.Command, args []string) {
 		exit.WithError("Failed to save config", err)
 	}
 
+	fmt.Println("start machine")
 	// exits here in case of --download-only option.
 	handleDownloadOnly(&cacheGroup, k8sVersion)
 	mRunner, preExists, machineAPI, host := startMachine(&config)
 	// configure the runtime (docker, containerd, crio)
+	fmt.Println("configure runtimes")
 	cr := configureRuntimes(mRunner, driverName, config.KubernetesConfig)
 	showVersionInfo(k8sVersion, cr)
 	waitCacheImages(&cacheGroup)
 
 	// Must be written before bootstrap, otherwise health checks may flake due to stale IP
-	kubeconfig, err := setupKubeconfig(host, &config, config.Name)
+	fmt.Println("setup kubeconfig")
+	kubeconfig, err := setupKubeconfig(host, &config, viper.GetString(cfg.MachineProfile))
 	if err != nil {
 		exit.WithError("Failed to setup kubeconfig", err)
 	}
 
+	fmt.Println("setup kubeadm")
 	// setup kubeadm (must come after setupKubeconfig)
-	bs := setupKubeAdm(machineAPI, config, cr)
+	bs, certs := setupKubeAdm(machineAPI, config, cr)
 
 	// pull images or restart cluster
 	bootstrapCluster(bs, cr, mRunner, config.KubernetesConfig, preExists, isUpgrade)
@@ -381,7 +385,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	if err := showKubectlInfo(kubeconfig, k8sVersion, config.Name); err != nil {
+	if err := showKubectlInfo(kubeconfig, k8sVersion); err != nil {
 		glog.Errorf("kubectl info: %v", err)
 	}
 
@@ -400,8 +404,8 @@ func runStart(cmd *cobra.Command, args []string) {
 		}*/
 		for i := 1; i < n; i++ {
 			k := config
-			k.KubernetesConfig.NodeName = fmt.Sprintf("%s-%d", config.KubernetesConfig.NodeName, i+1)
-			k.Name = fmt.Sprintf("%s-%d", config.Name, i+1)
+			k.KubernetesConfig.NodeName = fmt.Sprintf("%s%d", config.KubernetesConfig.NodeName, i+1)
+			k.Name = fmt.Sprintf("%s%d", config.Name, i+1)
 			if err := saveConfig(&k); err != nil {
 				exit.WithError("Failed to save config", err)
 			}
@@ -417,23 +421,34 @@ func runStart(cmd *cobra.Command, args []string) {
 			ncr := configureRuntimes(r, driverName, k.KubernetesConfig)
 
 			if !p {
-				//_, err = setupKubeconfig(h, &k, config.Name)
+				//_, err = setupKubeconfig(h, &k, viper.GetString(cfg.MachineProfile))
 
 				for _, eo := range extraOptions {
 					out.T(out.Option, "{{.extra_option_component_name}}.{{.key}}={{.value}}", out.V{"extra_option_component_name": eo.Component, "key": eo.Key, "value": eo.Value})
 				}
 				fmt.Println("Updating node")
 				// Loads cached images, generates config files, download binaries
-				if err := nbs.UpdateNode(k, ncr); err != nil {
-					exit.WithError("Failed to update cluster", err)
+				if err := nbs.UpdateNode(k, ncr, config.KubernetesConfig.NodeIP); err != nil {
+					exit.WithError("Failed to update node", err)
 				}
 				fmt.Println("Setting up certs")
-				if err := nbs.SetupCerts(k.KubernetesConfig); err != nil {
-					exit.WithError("Failed to setup certs", err)
+
+				for _, c := range certs {
+					fmt.Println(c.GetTargetName())
+					if c.GetTargetName() == "kubeconfig" {
+						continue
+					}
+					if err != nil {
+						exit.WithError("Getting command runner", err)
+					}
+					if err := r.Copy(c); err != nil {
+						exit.WithError("Failed to copy certs", err)
+					}
 				}
+
 			}
 			fmt.Println("Joining cluster")
-			if err := nbs.JoinCluster(config, ncr, joinCmd); err != nil {
+			if err := nbs.JoinCluster(config, ncr, joinCmd, k.KubernetesConfig.NodeName); err != nil {
 				exit.WithLogEntries("Error joining cluster", err, logs.FindProblems(ncr, nbs, r))
 			}
 
@@ -539,20 +554,24 @@ func startMachine(config *cfg.MachineConfig) (runner command.Runner, preExists b
 	if err != nil {
 		exit.WithError("Failed to get machine client", err)
 	}
+	fmt.Println("start host")
 	host, preExists = startHost(m, *config)
 	runner, err = machine.CommandRunner(host)
 	if err != nil {
 		exit.WithError("Failed to get command runner", err)
 	}
 
+	fmt.Println("validate network")
 	ip := validateNetwork(host, runner)
 	// Bypass proxy for minikube's vm host ip
+	fmt.Println("exclude ip")
 	err = proxy.ExcludeIP(ip)
 	if err != nil {
 		out.ErrT(out.FailureType, "Failed to set NO_PROXY Env. Please use `export NO_PROXY=$NO_PROXY,{{.ip}}`.", out.V{"ip": ip})
 	}
 	// Save IP to configuration file for subsequent use
 	config.KubernetesConfig.NodeIP = ip
+	fmt.Println("save config")
 	if err := saveConfig(config); err != nil {
 		exit.WithError("Failed to save config", err)
 	}
@@ -571,11 +590,11 @@ func showVersionInfo(k8sVersion string, cr cruntime.Manager) {
 	}
 }
 
-func showKubectlInfo(kcs *kubeconfig.Settings, k8sVersion string, machineName string) error {
+func showKubectlInfo(kcs *kubeconfig.Settings, k8sVersion string) error {
 	if kcs.KeepContext {
 		out.T(out.Kubectl, "To connect to this cluster, use: kubectl --context={{.name}}", out.V{"name": kcs.ClusterName})
 	} else {
-		out.T(out.Ready, `Done! kubectl is now configured to use "{{.name}}"`, out.V{"name": machineName})
+		out.T(out.Ready, `Done! kubectl is now configured to use "{{.name}}"`, out.V{"name": kcs.ClusterName})
 	}
 
 	path, err := exec.LookPath("kubectl")
@@ -997,7 +1016,6 @@ func generateCfgFromFlags(cmd *cobra.Command, k8sVersion string, drvName string)
 			ExtraOptions:           extraOptions,
 			ShouldLoadCachedImages: viper.GetBool(cacheImages),
 			EnableDefaultCNI:       selectedEnableDefaultCNI,
-			BootstrapToken:         generateBootstrapToken(),
 		},
 	}
 	return cfg, nil
@@ -1239,7 +1257,8 @@ func getKubernetesVersion(old *cfg.MachineConfig) (string, bool) {
 }
 
 // setupKubeAdm adds any requested files into the VM before Kubernetes is started
-func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig, cr cruntime.Manager) bootstrapper.Bootstrapper {
+func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig, cr cruntime.Manager) (bootstrapper.Bootstrapper, []assets.CopyableFile) {
+	fmt.Println("get bootstraooer")
 	bs, err := getClusterBootstrapper(mAPI, viper.GetString(cmdcfg.Bootstrapper), kc.Name)
 	if err != nil {
 		exit.WithError("Failed to get bootstrapper", err)
@@ -1247,14 +1266,17 @@ func setupKubeAdm(mAPI libmachine.API, kc cfg.MachineConfig, cr cruntime.Manager
 	for _, eo := range extraOptions {
 		out.T(out.Option, "{{.extra_option_component_name}}.{{.key}}={{.value}}", out.V{"extra_option_component_name": eo.Component, "key": eo.Key, "value": eo.Value})
 	}
+	fmt.Println("copy binaries")
 	// Loads cached images, generates config files, download binaries
 	if err := bs.UpdateCluster(kc, cr); err != nil {
 		exit.WithError("Failed to update cluster", err)
 	}
-	if err := bs.SetupCerts(kc.KubernetesConfig); err != nil {
+	fmt.Println("setup certs")
+	certs, err := bs.SetupCerts(kc.KubernetesConfig)
+	if err != nil {
 		exit.WithError("Failed to setup certs", err)
 	}
-	return bs
+	return bs, certs
 }
 
 // configureRuntimes does what needs to happen to get a runtime going.
@@ -1321,11 +1343,4 @@ func configureMounts() {
 // saveConfig saves profile cluster configuration in $MINIKUBE_HOME/profiles/<profilename>/config.json
 func saveConfig(clusterCfg *cfg.MachineConfig) error {
 	return cfg.CreateProfile(viper.GetString(cfg.MachineProfile), clusterCfg)
-}
-
-func generateBootstrapToken() string {
-	first := uniuri.NewLen(6)
-	second := uniuri.NewLen(16)
-
-	return fmt.Sprintf("%s.%s", strings.ToLower(first), strings.ToLower(second))
 }

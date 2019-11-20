@@ -30,6 +30,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
@@ -60,7 +61,7 @@ var (
 )
 
 // SetupCerts gets the generated credentials required to talk to the APIServer.
-func SetupCerts(cmd command.Runner, k8s config.KubernetesConfig) error {
+func SetupCerts(cmd command.Runner, k8s config.KubernetesConfig) ([]assets.CopyableFile, error) {
 	// WARNING: This function was not designed for multiple profiles, so it is VERY racey:
 	//
 	// It updates a shared certificate file and uploads it to the apiserver before launch.
@@ -75,16 +76,18 @@ func SetupCerts(cmd command.Runner, k8s config.KubernetesConfig) error {
 	glog.Infof("acquiring lock: %+v", spec)
 	releaser, err := mutex.Acquire(spec)
 	if err != nil {
-		return errors.Wrapf(err, "unable to acquire lock for %+v", spec)
+		return nil, errors.Wrapf(err, "unable to acquire lock for %+v", spec)
 	}
 	defer releaser.Release()
 
 	localPath := localpath.MiniPath()
 	glog.Infof("Setting up %s for IP: %s\n", localPath, k8s.NodeIP)
+	fmt.Printf("Setting up %s for IP: %s\n", localPath, k8s.NodeIP)
 
 	if err := generateCerts(k8s); err != nil {
-		return errors.Wrap(err, "Error generating certs")
+		return nil, errors.Wrap(err, "Error generating certs")
 	}
+	fmt.Println("creating certs")
 	copyableFiles := []assets.CopyableFile{}
 	for _, cert := range certs {
 		p := filepath.Join(localPath, cert)
@@ -94,26 +97,27 @@ func SetupCerts(cmd command.Runner, k8s config.KubernetesConfig) error {
 		}
 		certFile, err := assets.NewFileAsset(p, vmpath.GuestCertsDir, cert, perms)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		copyableFiles = append(copyableFiles, certFile)
 	}
 
+	fmt.Println("collect ca certs")
 	caCerts, err := collectCACerts()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for src, dst := range caCerts {
 		certFile, err := assets.NewFileAsset(src, path.Dir(dst), path.Base(dst), "0644")
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		copyableFiles = append(copyableFiles, certFile)
 	}
 
 	kcs := &kubeconfig.Settings{
-		ClusterName:          k8s.NodeName,
+		ClusterName:          viper.GetString(config.MachineProfile),
 		ClusterServerAddress: fmt.Sprintf("https://localhost:%d", k8s.NodePort),
 		ClientCertificate:    path.Join(vmpath.GuestCertsDir, "apiserver.crt"),
 		ClientKey:            path.Join(vmpath.GuestCertsDir, "apiserver.key"),
@@ -121,30 +125,33 @@ func SetupCerts(cmd command.Runner, k8s config.KubernetesConfig) error {
 		KeepContext:          false,
 	}
 
+	fmt.Println("populate kubeconfig")
 	kubeCfg := api.NewConfig()
 	err = kubeconfig.PopulateFromSettings(kcs, kubeCfg)
 	if err != nil {
-		return errors.Wrap(err, "populating kubeconfig")
+		return nil, errors.Wrap(err, "populating kubeconfig")
 	}
 	data, err := runtime.Encode(latest.Codec, kubeCfg)
 	if err != nil {
-		return errors.Wrap(err, "encoding kubeconfig")
+		return nil, errors.Wrap(err, "encoding kubeconfig")
 	}
 
 	kubeCfgFile := assets.NewMemoryAsset(data, vmpath.GuestPersistentDir, "kubeconfig", "0644")
 	copyableFiles = append(copyableFiles, kubeCfgFile)
 
+	fmt.Println("copy certs")
 	for _, f := range copyableFiles {
 		if err := cmd.Copy(f); err != nil {
-			return errors.Wrapf(err, "Copy %s", f.GetAssetName())
+			return nil, errors.Wrapf(err, "Copy %s", f.GetAssetName())
 		}
 	}
 
 	// configure CA certificates
 	if err := configureCACerts(cmd, caCerts); err != nil {
-		return errors.Wrapf(err, "Configuring CA certs")
+		return nil, errors.Wrapf(err, "Configuring CA certs")
 	}
-	return nil
+	// Return certs so we can copy them to worker nodes
+	return copyableFiles, nil
 }
 
 func generateCerts(k8s config.KubernetesConfig) error {

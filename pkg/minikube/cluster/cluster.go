@@ -574,8 +574,7 @@ func CheckIfHostExistsAndLoad(api libmachine.API, machineName string) (*host.Hos
 }
 
 // CreateSSHShell creates a new SSH shell / client
-func CreateSSHShell(api libmachine.API, args []string) error {
-	machineName := viper.GetString(config.MachineProfile)
+func CreateSSHShell(api libmachine.API, machineName string, args []string) error {
 	host, err := CheckIfHostExistsAndLoad(api, machineName)
 	if err != nil {
 		return errors.Wrap(err, "host exists and load")

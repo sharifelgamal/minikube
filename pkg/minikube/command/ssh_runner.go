@@ -162,11 +162,8 @@ func (s *SSHRunner) Copy(f assets.CopyableFile) error {
 	if err != nil {
 		return errors.Wrap(err, "NewSession")
 	}
+	defer sess.Close()
 
-	w, err := sess.StdinPipe()
-	if err != nil {
-		return errors.Wrap(err, "StdinPipe")
-	}
 	// The scpcmd below *should not* return until all data is copied and the
 	// StdinPipe is closed. But let's use errgroup to make it explicit.
 	var g errgroup.Group
@@ -174,6 +171,10 @@ func (s *SSHRunner) Copy(f assets.CopyableFile) error {
 	glog.Infof("Transferring %d bytes to %s", f.GetLength(), dst)
 
 	g.Go(func() error {
+		w, err := sess.StdinPipe()
+		if err != nil {
+			return errors.Wrap(err, "StdinPipe")
+		}
 		defer w.Close()
 		header := fmt.Sprintf("C%s %d %s\n", f.GetPermissions(), f.GetLength(), f.GetTargetName())
 		fmt.Fprint(w, header)
@@ -182,7 +183,7 @@ func (s *SSHRunner) Copy(f assets.CopyableFile) error {
 			fmt.Fprint(w, "\x00")
 			return nil
 		}
-
+		f.Seek(0, io.SeekStart)
 		copied, err = io.Copy(w, f)
 		if err != nil {
 			return errors.Wrap(err, "io.Copy")
