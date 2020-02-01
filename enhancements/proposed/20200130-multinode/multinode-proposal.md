@@ -1,6 +1,6 @@
 # Your inspiring proposal title
 
-* First proposed: 01/31/2020
+* First proposed: 2020-01-31
 * Authors: Sharif Elgamal (@sharifelgamal)
 
 ## Reviewer Priorities
@@ -12,30 +12,28 @@ Please review this proposal with the following priorities:
 *   Could the implementation be made simpler?
 *   Are there usability, reliability, or technical debt concerns?
 
-Please leave the above text in your proposal as instructions to the reader.
-
 ## Summary
 
-_(1 paragraph) What are you proposing, and why is it important to users and/or developers?_
+Until now minikube has always been a local single node Kubernetes cluster. Having multiple nodes in minikube clusters has been [the most requested feature](https://github.com/kubernetes/minikube/issues/94) in this history of the minikube repository.
 
 ## Goals
 
-*   _A bulleted list of specific goals for this proposal_
-*   _How will we know that this proposal has succeeded?_
+*   Enabling clusters with any number of control plane and worker nodes.
+*   The ability to add and remove nodes from any cluster.
+*   The ability to customize config per node.
 
 ## Non-Goals
 
-*   _A bulleted list of what is out of scope for this proposal_
-*   _Listing non-goals helps to focus the discussion_
+*   Reproducing production environments
 
 ## Design Details
 
-_(2+ paragraphs) A short overview of your implementation idea, containing only as much detail as required to convey your idea._
+Since minikube was designed with only a single node cluster in mind, we need to make some fairly significant refactors, the biggest of which is the introduction of the Node object. Each cluster config will be able to have an abitrary number of Node objects, each of which will have attributes that can define it, similar to what [tstromberg proposed](https://github.com/kubernetes/minikube/pull/5874) but with better backwards compatibility with current config.
 
-_If you have multiple ideas, list them concisely._
+Each node will correspond to one VM (or container) and will connect back to the primary control plane via `kubeadm join`.
 
-_Include a testing plan to ensure that your enhancement is not broken by future changes._
+Also added will be the `node` sub command, e.g. `minikube node start` and `minikube node delete`. This will allow users to control their cluster however they please. Eventually, we will want to support passing in a `yaml` file into `minikube start` that defines all the nodes and their configs in one go. 
 
 ## Alternatives Considered
 
-_Alternative ideas that you are leaning against._
+_TBD_
