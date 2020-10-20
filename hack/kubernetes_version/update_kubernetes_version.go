@@ -42,6 +42,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/blang/semver"
 	"github.com/google/go-github/v32/github"
 
 	"k8s.io/klog/v2"
@@ -402,23 +403,56 @@ func ghReleases(ctx context.Context, owner, repo, token string) (stable, latest 
 			if ver == "" {
 				continue
 			}
+
+			// Trim unnecessary prefixes from the version number for semver
+			ver = strings.TrimPrefix(ver, "Release ")
+			ver = strings.TrimPrefix(ver, "v")
+			v, err := semver.Make(ver)
+			if err != nil {
+				klog.Warningf("error getting semver for %s, skipping: %v", ver, err)
+				continue
+			}
+
+			// s and l will be the semver objects for stable and latest respectively
+			var s, l semver.Version
+
 			// check if ver version is a release (ie, 'v1.19.2') or a
 			// pre-release (ie, 'v1.19.3-rc.0' or 'v1.19.0-beta.2') channel ch
 			// note: github.RepositoryRelease GetPrerelease() bool would be useful for all pre-rels
-			ch := strings.Split(ver, "-")
-			if len(ch) == 1 && stable == "" {
-				stable = ver
-			} else if len(ch) > 1 && latest == "" {
-				if strings.HasPrefix(ch[1], "rc") || strings.HasPrefix(ch[1], "beta") {
-					latest = ver
+			if len(v.Pre) == 0 {
+				if stable == "" {
+					stable = ver
+				} else {
+					s, err = semver.Make(stable)
+					if err != nil {
+						klog.Warningf("error getting semver for %s, skipping: %v", stable, err)
+						continue
+					}
+					if v.GT(s) {
+						stable = ver
+					}
+				}
+			} else if len(v.Pre) > 0 {
+				if latest == "" {
+					if strings.HasPrefix(v.Pre[0].VersionStr, "rc") || strings.HasPrefix(v.Pre[0].VersionStr, "beta") {
+						latest = ver
+					}
+				} else {
+					l, err = semver.Make(latest)
+					if err != nil {
+						klog.Warningf("error getting semver for %s, skipping: %v", latest, err)
+						continue
+					}
+					if v.GT(l) && (strings.HasPrefix(v.Pre[0].VersionStr, "rc") || strings.HasPrefix(v.Pre[0].VersionStr, "beta")) {
+						latest = ver
+					}
 				}
 			}
 			if stable != "" && latest != "" {
 				// make sure that v.Latest >= stable
-				if latest < stable {
+				if s.GT(l) {
 					latest = stable
 				}
-				return stable, latest, nil
 			}
 		}
 		if resp.NextPage == 0 {
