@@ -141,6 +141,8 @@ REM @FOR /f "tokens=*" %%i IN ('%s') DO @%%i
 var defaultSh = "bash"
 var defaultShell shellData = shellConfigMap[defaultSh]
 
+var powershell = "powershell"
+
 var (
 	// ForceShell forces a shell name
 	ForceShell string
@@ -153,6 +155,15 @@ func Detect() (string, error) {
 	if sh == "" && runtime.GOOS != "windows" {
 		return defaultSh, nil
 	}
+
+	// $host.name is not an env var, but rather a reserved variable for powershell
+	// check it explicitly with an echo to cover cases where someone is ssh'd into a windows
+	// machine but wants to run powershell
+	ps, _ := exec.Command("echo $host.name").CombinedOutput()
+	if ps == "ConsoleHost" {
+		return powershell, nil
+	}
+
 	return shell.Detect()
 }
 

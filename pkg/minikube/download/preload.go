@@ -85,7 +85,7 @@ func remoteTarballURL(k8sVersion, containerRuntime string) string {
 	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", PreloadBucket, TarballName(k8sVersion, containerRuntime))
 }
 
-// PreloadExists returns true if there is a preloaded tarball that can be used
+// PreloadExists returns true if there is a preloaded tarball that can be used, either locally or remotely
 func PreloadExists(k8sVersion, containerRuntime string, forcePreload ...bool) bool {
 	// TODO (#8166): Get rid of the need for this and viper at all
 	force := false
