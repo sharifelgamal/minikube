@@ -30,7 +30,7 @@ import (
 	"k8s.io/minikube/pkg/util"
 )
 
-const newPath = "../../out/minikube"
+const newPath = "out/minikube"
 const cmdTimeout = int64(90 * 1000)
 
 // TestStress runs the stress test
@@ -47,7 +47,7 @@ func TestStress(t *testing.T) {
 		t.Fatalf("latest minikube binary is missing, run make")
 	}
 
-	oldPath := fmt.Sprintf("../../out/minikube-%s", *upgradeFrom)
+	oldPath := fmt.Sprintf("out/minikube-%s", *upgradeFrom)
 	url := util.GetBinaryDownloadURL(*upgradeFrom, runtime.GOOS)
 	t.Logf("Downloading minikube %s from %s", *upgradeFrom, url)
 	err = getter.GetFile(oldPath, url)
