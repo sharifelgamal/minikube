@@ -394,7 +394,7 @@ darwin: minikube-darwin-amd64 ## Build minikube for Darwin 64bit
 linux: minikube-linux-amd64 ## Build minikube for Linux 64bit
 
 .PHONY: e2e-cross
-e2e-cross: e2e-linux-amd64 e2e-linux-arm64 e2e-darwin-amd64 e2e-windows-amd64.exe ## End-to-end cross test
+e2e-cross: e2e-linux-amd64 e2e-linux-arm64 e2e-darwin-amd64 e2e-windows-amd64.exe stress-linux-amd64 ## End-to-end cross test
 
 .PHONY: checksum
 checksum: ## Generate checksums
@@ -881,6 +881,9 @@ else
 	 export UPDATE_TARGET="all" && \
 	 go run update_kubernetes_version.go)
 endif
+
+.PHONY stress-linux-amd64
+stress-linux-amd64: out/stress-linux-amd64
 
 .PHONY: out/stress-linux-amd64
 out/stress-linux-amd64: out/minikube ## build the stress test binary
